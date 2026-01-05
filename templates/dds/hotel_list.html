@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Отели — Акча-Hotel{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0">Отели</h1>
+    <div class="text-muted small">Выберите отель, чтобы открыть кассу и отчёты</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'dds:dds_dashboard' %}">← Назад</a>
+</div>
+
+<div class="card app-card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>Отель</th>
+            <th>Статус</th>
+            <th class="text-end"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in hotels %}
+          <tr>
+            <td><b>{{ h.name }}</b></td>
+            <td>
+              {% if h.is_active %}
+                <span class="badge bg-success">Активен</span>
+              {% else %}
+                <span class="badge bg-secondary">Отключен</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-dark" href="{% url 'dds:hotel_detail' h.id %}">
+                Открыть
+              </a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="text-muted">Нет доступных отелей</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
