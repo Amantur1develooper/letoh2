@@ -7,6 +7,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import F
+from django.db import models
 
 
 class Hotel(models.Model):
@@ -17,10 +18,14 @@ class Hotel(models.Model):
     name = models.CharField(max_length=150)
     is_active = models.BooleanField(default=True)
 
+    class Meta:
+        verbose_name = "Отель"
+        verbose_name_plural = "Отели"
+        ordering = ["name"]
+        
     def __str__(self):
         return self.name
-from django.db import models
-from django.db.models import Q
+
 
 class DDSCategory(models.Model):
     INCOME = "income"
@@ -43,9 +48,14 @@ class DDSCategory(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
+        verbose_name = "Категория ДДС"
+        verbose_name_plural = "Категории ДДС"
         ordering = ["kind", "parent_id", "name"]
         constraints = [
-            models.UniqueConstraint(fields=["kind", "parent", "name"], name="uniq_dds_category_kind_parent_name")
+            models.UniqueConstraint(
+                fields=["kind", "parent", "name"],
+                name="uniq_dds_category_kind_parent_name",
+            )
         ]
 
     def __str__(self):
@@ -74,13 +84,15 @@ class DDSArticle(models.Model):
     is_active = models.BooleanField(default=True, verbose_name="активно?")
 
     class Meta:
-        constraints = [
-            # можно оставить как было:
-            # models.UniqueConstraint(fields=["kind", "name"], name="uniq_dds_article_kind_name")
-            # но лучше так (учитывая категорию):
-            models.UniqueConstraint(fields=["kind", "category", "name"], name="uniq_dds_article_kind_cat_name")
-        ]
+        verbose_name = "Статья ДДС"
+        verbose_name_plural = "Статьи ДДС"
         ordering = ["kind", "category_id", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["kind", "category", "name"],
+                name="uniq_dds_article_kind_cat_name",
+            )
+        ]
 
     def __str__(self):
         if self.category:
@@ -132,6 +144,8 @@ class DDSOperation(models.Model):
     )
 
     class Meta:
+        verbose_name = "Операция ДДС"
+        verbose_name_plural = "Операции ДДС"
         ordering = ["-happened_at", "-id"]
         indexes = [
             models.Index(fields=["hotel", "happened_at"]),
@@ -178,6 +192,8 @@ class CashIncasso(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = "Инкассация"
+        verbose_name_plural = "Инкассации"
         ordering = ["-happened_at", "-id"]
 
     def __str__(self):
@@ -204,7 +220,12 @@ class CashRegister(models.Model):
     @property
     def total(self):
         return (self.cash_balance or 0) + self.noncash_total
-
+    
+    class Meta:
+        verbose_name = "Касса"
+        verbose_name_plural = "Кассы"
+        ordering = ["hotel__name"]
+        
     def __str__(self):
         return f"Касса {self.hotel.name} | нал={self.cash_balance} | безнал={self.noncash_total}"
 
@@ -254,6 +275,9 @@ class CashMovement(models.Model):
         return self.amount if self.direction == self.IN else -self.amount
 
     class Meta:
+        verbose_name = "Движение денег"
+        verbose_name_plural = "Движения денег"
+        ordering = ["-happened_at", "-id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["dds_operation", "account", "direction"],
