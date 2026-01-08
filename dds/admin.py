@@ -23,3 +23,15 @@ class DDSOperationAdmin(admin.ModelAdmin):
     list_display = ("id", "hotel", "article", "amount", "happened_at", "method", "is_voided")
     list_filter = ("hotel", "article__kind", "method", "is_voided")
     search_fields = ("counterparty", "comment", "source")
+
+
+# dds/admin.py
+from django.contrib import admin
+from .models import CashTransfer
+
+@admin.register(CashTransfer)
+class CashTransferAdmin(admin.ModelAdmin):
+    list_display = ("id", "hotel", "from_account", "to_account", "amount", "happened_at", "created_by", "is_voided")
+    list_filter = ("hotel", "from_account", "to_account", "is_voided")
+    search_fields = ("comment",)
+    date_hierarchy = "happened_at"

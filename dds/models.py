@@ -269,12 +269,30 @@ class CashMovement(models.Model):
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="cash_moves_created")
     created_at = models.DateTimeField(auto_now_add=True)
+    transfer = models.ForeignKey(
+        "CashTransfer", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="movements", verbose_name="Перевод"
+    )
 
     @property
     def signed_amount(self):
         return self.amount if self.direction == self.IN else -self.amount
-
+    
+        
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dds_operation", "account", "direction"],
+                name="uniq_cashmove_dds_account_dir",
+                condition=Q(dds_operation__isnull=False),
+            ),
+            # ✅ чтобы один перевод создавал максимум 2 движения (IN/OUT по одному разу)
+            models.UniqueConstraint(
+                fields=["transfer", "account", "direction"],
+                name="uniq_cashmove_transfer_account_dir",
+                condition=Q(transfer__isnull=False),
+            ),
+        ]
         verbose_name = "Движение денег"
         verbose_name_plural = "Движения денег"
         ordering = ["-happened_at", "-id"]
@@ -285,3 +303,53 @@ class CashMovement(models.Model):
                 condition=Q(dds_operation__isnull=False),
             )
         ]
+
+
+# dds/models.py (или где у тебя CashRegister/CashMovement)
+
+from django.db import models
+from django.conf import settings
+from django.utils import timezone
+from django.db.models import Q
+
+class CashTransfer(models.Model):
+    """
+    Внутренний перевод между счетами в рамках одного отеля.
+    Пример: OPTIMA -> CASH.
+    """
+    hotel = models.ForeignKey("dds.Hotel", on_delete=models.PROTECT, related_name="cash_transfers", verbose_name="Отель")
+    register = models.ForeignKey("CashRegister", on_delete=models.PROTECT, related_name="transfers", verbose_name="Касса")
+
+    from_account = models.CharField(max_length=10, choices=CashMovement.ACCOUNT_CHOICES, verbose_name="Со счета")
+    to_account = models.CharField(max_length=10, choices=CashMovement.ACCOUNT_CHOICES, verbose_name="На счет")
+
+    amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Сумма")
+    happened_at = models.DateTimeField(default=timezone.now, verbose_name="Дата")
+    comment = models.TextField(blank=True, verbose_name="Комментарий")
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="cash_transfers_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # как у ДДС — мягкая отмена
+    is_voided = models.BooleanField(default=False)
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="cash_transfers_voided", null=True, blank=True
+    )
+
+    class Meta:
+        verbose_name = "Перевод между счетами"
+        verbose_name_plural = "Переводы между счетами"
+        ordering = ["-happened_at", "-id"]
+        indexes = [models.Index(fields=["hotel", "happened_at"])]
+
+    def __str__(self):
+        return f"{self.hotel} {self.from_account}->{self.to_account} {self.amount}"
+
+
+# class CashMovement(models.Model):
+#     # ... твои поля как есть ...
+
+    

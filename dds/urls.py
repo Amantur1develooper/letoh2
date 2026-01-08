@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from .views_cash import cash_transfer_create
+
 
 app_name = "dds"
 
@@ -19,6 +21,9 @@ urlpatterns = [
 
     path("report/", views.unified_report, name="unified_report"),
 
+    path("cash-transfer/add/<int:hotel_id>/", cash_transfer_create, name="cash_transfer_create"),
+    # path("cash/transfer/add/", transfer_create, name="transfer_create"),
+    
     path("hotels/<int:pk>/incasso/", views.incasso_create, name="incasso_create"),
     path("accounting/", views.accounting, name="accounting"),
     path("accounting/export/excel/", views.accounting_export_excel, name="accounting_excel"),

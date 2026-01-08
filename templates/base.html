@@ -52,6 +52,9 @@
         <li class="nav-item">
           <a class="nav-link" href="{% url 'dds:dds_list' %}">Реестр</a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link" href="{% url 'pms:board' %}">Шахматка   </a>
+        </li>
         {% comment %} {% if user.is_authenticated and user.is_superuser %}
           <li class="nav-item">
             <a class="nav-link" href="{% url 'dds:dds_articles' %}">Статьи</a>
@@ -99,7 +102,7 @@
 
   {% block content %}{% endblock %}
 </main>
-
+ {% block content2 %}{% endblock %}
 <footer class="py-4">
   <div class="container text-center text-muted small">
     © {{ now|date:"Y" }} Акча-Hotel • Финансы и учёт

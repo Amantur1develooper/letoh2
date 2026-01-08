@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     # "accounts",
      "accounts.apps.AccountsConfig",
     # "dds",
+    'pms',
     "dds.apps.DdsConfig"
 ]
 
