@@ -346,10 +346,6 @@ class CashTransfer(models.Model):
         indexes = [models.Index(fields=["hotel", "happened_at"])]
 
     def __str__(self):
+        
+        
         return f"{self.hotel} {self.from_account}->{self.to_account} {self.amount}"
-
-
-# class CashMovement(models.Model):
-#     # ... твои поля как есть ...
-
-    

@@ -206,7 +206,29 @@
 {{ expense_cat_percent|json_script:"expense-cat-percent" }}
 {{ expense_cat_share|json_script:"expense-cat-share" }}
 
-
+  <div class="col-lg-5">
+    <div class="card app-card">
+      <div class="card-body">
+        <h2 class="h6 mb-2">Инкассации</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>Дата</th><th>Отель</th><th class="text-end">Сумма</th></tr></thead>
+            <tbody>
+              {% for i in incassos %}
+                <tr>
+                  <td>{{ i.happened_at|date:"d.m.Y H:i" }}</td>
+                  <td>{{ i.hotel.name }}</td>
+                  <td class="text-end"><b>{{ i.amount }}</b></td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="3" class="text-muted">Нет инкассаций</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 
 <script>
   const incomeData = JSON.parse(document.getElementById("income-chart-data").textContent);

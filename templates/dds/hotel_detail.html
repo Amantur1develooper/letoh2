@@ -31,8 +31,12 @@
     <div class="text-muted small">Касса (нал/безнал) и ДДС по отелю</div>
   </div>
   <div class="d-flex gap-2">
+   
+
     <a class="btn btn-outline-secondary" href="{% url 'dds:hotel_list' %}">← Отели</a>
     <a class="btn btn-outline-dark" href="{% url 'dds:incasso_create' hotel.id %}">Инкассация</a>
+     <a class="btn btn-sm btn-primary" href="{% url 'dds:income_add' hotel.id %}">+ Доход</a>
+<a class="btn btn-sm btn-danger" href="{% url 'dds:expense_add' hotel.id %}">+ Расход</a>
     <a class="btn btn-primary" href="{% url 'dds:dds_create' %}">+ Операция</a>
   </div>
 </div>

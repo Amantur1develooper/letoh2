@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views_cash import cash_transfer_create
+from .views_cash import cash_transfer_create, dds_op_add, dds_op_add, dds_articles_json
 
 
 app_name = "dds"
@@ -23,6 +23,21 @@ urlpatterns = [
 
     path("cash-transfer/add/<int:hotel_id>/", cash_transfer_create, name="cash_transfer_create"),
     # path("cash/transfer/add/", transfer_create, name="transfer_create"),
+    
+    
+    path("hotel/<int:hotel_id>/income/add/", dds_op_add, {"kind": "income"}, name="income_add"),
+    path("hotel/<int:hotel_id>/expense/add/", dds_op_add, {"kind": "expense"}, name="expense_add"),
+    # path("hotel/<int:hotel_id>/income/add/", dds_op_add, {"kind": "income"}, name="income_add"),
+    # path("hotel/<int:hotel_id>/expense/add/", dds_op_add, {"kind": "expense"}, name="expense_add"),
+    #  path("hotel/<int:hotel_id>/income/add/", views.dds_op_add, {"kind": "income"}, name="income_add"),
+    # path("hotel/<int:hotel_id>/expense/add/", views.dds_op_add, {"kind": "expense"}, name="expense_add"),
+    # path("articles/", dds_articles_json, name="articles_json"),
+    # Ajax: статьи по категории
+    path("articles/", dds_articles_json, name="articles_json"),
+    
+
+    
+    
     
     path("hotels/<int:pk>/incasso/", views.incasso_create, name="incasso_create"),
     path("accounting/", views.accounting, name="accounting"),

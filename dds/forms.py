@@ -116,3 +116,182 @@ class CashTransferForm(forms.ModelForm):
             cleaned["happened_at"] = timezone.now()
 
         return cleaned
+
+
+# dds/forms.py
+from django import forms
+from .models import DDSOperation, DDSCategory, DDSArticle
+
+class DDSQuickOpForm(forms.ModelForm):
+    category = forms.ModelChoiceField(
+        queryset=DDSCategory.objects.none(),
+        required=False,
+        label="Категория",
+    )
+
+    class Meta:
+        model = DDSOperation
+        fields = ["article", "amount", "happened_at", "method", "counterparty", "comment"]
+        widgets = {
+            "happened_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "comment": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, kind: str, hotel=None, category_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # категории только нужного вида (доход/расход)
+        self.fields["category"].queryset = DDSCategory.objects.filter(is_active=True, kind=kind).order_by("parent_id", "name")
+
+        # статьи только нужного вида и (по умолчанию) активные
+        qs = DDSArticle.objects.filter(is_active=True, kind=kind)
+
+        # если выбрали категорию — сужаем статьи
+        if category_id:
+            try:
+                cat_id = int(category_id)
+                # категория + её дети (2 уровня достаточно для MVP)
+                qs = qs.filter(category_id=cat_id) | qs.filter(category__parent_id=cat_id)
+            except Exception:
+                pass
+
+        self.fields["article"].queryset = qs.select_related("category").order_by("category_id", "name")
+        self.fields["article"].label = "Статья"
+
+        # чуть удобнее отображение
+        self.fields["amount"].widget.attrs.update({"placeholder": "0.00"})
+
+
+# dds/forms.py
+from django import forms
+from django.db.models import Q
+from .models import DDSOperation, DDSCategory, DDSArticle
+
+class DDSOpForm(forms.ModelForm):
+    category = forms.ModelChoiceField(
+        queryset=DDSCategory.objects.none(),
+        required=False,
+        label="Категория",
+        empty_label="— выбери категорию —",
+    )
+
+    class Meta:
+        model = DDSOperation
+        fields = ["category", "article", "amount", "happened_at", "method", "counterparty", "comment"]
+        widgets = {
+            "happened_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "comment": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, kind: str, category_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kind = kind
+
+        # Категории только нужного вида (доход/расход)
+        self.fields["category"].queryset = (
+            DDSCategory.objects.filter(is_active=True, kind=kind)
+            .order_by("parent_id", "name")
+        )
+
+        # Статьи только нужного вида
+        articles = DDSArticle.objects.filter(is_active=True, kind=kind)
+
+        # ✅ Строго: только статьи выбранной категории
+        if category_id:
+            try:
+                cid = int(category_id)
+                articles = articles.filter(category_id=cid)
+            except Exception:
+                pass
+
+        self.fields["article"].queryset = articles.select_related("category").order_by("name")
+        self.fields["article"].label = "Статья"
+
+    def clean(self):
+        cleaned = super().clean()
+        cat = cleaned.get("category")
+        art = cleaned.get("article")
+
+        # ✅ защита: статья обязана принадлежать выбранной категории
+        if cat and art and art.category_id != cat.id:
+            self.add_error("article", "Эта статья не относится к выбранной категории.")
+        return cleaned
+
+
+# dds/forms.py
+from django import forms
+from django.utils import timezone
+
+from .models import DDSOperation, DDSCategory, DDSArticle
+
+
+class DDSOpCreateForm(forms.ModelForm):
+    # поле "категория" не в модели DDSOperation, но нужно для удобства
+    category = forms.ModelChoiceField(
+        queryset=DDSCategory.objects.none(),
+        required=True,
+        label="Категория",
+        empty_label="— выберите категорию —",
+    )
+
+    happened_at = forms.DateTimeField(
+        required=True,
+        label="Дата/время",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        input_formats=["%Y-%m-%dT%H:%M"],  # важно для datetime-local
+    )
+
+    class Meta:
+        model = DDSOperation
+        fields = [
+            "category",
+            "article",
+            "amount",
+            "happened_at",
+            "method",
+            "counterparty",
+            "comment",
+        ]
+        widgets = {
+            "comment": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, kind: str, category_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kind = kind
+
+        # категории только нужного вида
+        self.fields["category"].queryset = (
+            DDSCategory.objects.filter(is_active=True, kind=kind)
+            .order_by("parent_id", "name")
+        )
+
+        # статьи только нужного вида, и строго по категории
+        articles_qs = DDSArticle.objects.filter(is_active=True, kind=kind)
+
+        if category_id:
+            try:
+                cid = int(category_id)
+                articles_qs = articles_qs.filter(category_id=cid)
+                self.fields["category"].initial = cid
+            except Exception:
+                articles_qs = DDSArticle.objects.none()
+        else:
+            # пока не выбрали категорию — статей не показываем
+            articles_qs = DDSArticle.objects.none()
+
+        self.fields["article"].queryset = articles_qs.order_by("name")
+
+        # дата по умолчанию "сейчас"
+        if not self.initial.get("happened_at"):
+            now = timezone.localtime(timezone.now())
+            self.initial["happened_at"] = now.strftime("%Y-%m-%dT%H:%M")
+
+    def clean(self):
+        cleaned = super().clean()
+        cat = cleaned.get("category")
+        art = cleaned.get("article")
+
+        if cat and art and art.category_id != cat.id:
+            self.add_error("article", "Выбранная статья не относится к этой категории.")
+        return cleaned

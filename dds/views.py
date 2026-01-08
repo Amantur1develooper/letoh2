@@ -1,6 +1,4 @@
 from django.shortcuts import render
-
-# Create your views here.
 from datetime import datetime, time
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -15,25 +13,29 @@ from django.db.models import Sum, Q, F
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from openpyxl import Workbook
-from openpyxl.styles import Font
-
+from django.contrib import messages
+from django.shortcuts import redirect
+from .forms import CashIncassoForm
+from .models import CashIncasso
+from .models import CashMovement, CashRegister
+from django.db import transaction
+from .models import CashMovement, CashRegister # чтобы знать какое поле проверять
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from .cash_services import apply_cash_movement, FIELD_MAP
 from django.db.models import Sum, Q, F
 from django.db.models.functions import Coalesce
 from decimal import Decimal
 from datetime import datetime, time
 from django.utils import timezone
 from .models import DDSOperation, DDSArticle
-from .utils import user_hotels_qs
-from datetime import datetime, time
-from decimal import Decimal
-from django.db.models import Q
+
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
+from django.shortcuts import get_object_or_404
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -518,13 +520,31 @@ def dds_dashboard(request):
         "data": pie_data,
         "grand_total": float(grand_total),  # важно для tooltip в твоём JS
     }
+    profile = getattr(request.user, "profile", None)
+    if not (request.user.is_superuser or (profile and profile.is_finance_admin)):
+        return redirect("dds:dds_dashboard")
 
+    hotels = user_hotels_qs(request.user).order_by("name")
+
+    hotel_id = request.GET.get("hotel")
+    date_from = _parse_date(request.GET.get("date_from", ""))
+    date_to = _parse_date(request.GET.get("date_to", ""))
+
+    # фильтр по отелю
+    hotels_filter = hotels
+    if hotel_id:
+        hotels_filter = hotels.filter(id=hotel_id)
+
+    
+
+    # 2) ИНКАССАЦИИ
+    incassos = CashIncasso.objects.select_related("hotel").filter(hotel__in=hotels_filter)
     return render(request, "dds/dashboard.html", {
         "hotels": hotels_qs,
         "selected_hotel": selected_hotel,
         "date_from": date_from,
         "date_to": date_to,
-
+        "incassos": incassos.order_by("-happened_at")[:300], 
         "income_sum": income_sum,
         "expense_sum": expense_sum,
         "balance": balance,
@@ -824,10 +844,7 @@ from .models import Hotel, DDSOperation, DDSArticle
 from .utils import user_hotels_qs
 
 
-@login_required
-def hotel_list(request):
-    hotels = user_hotels_qs(request.user).order_by("name")
-    return render(request, "dds/hotel_list.html", {"hotels": hotels})
+
 from decimal import Decimal
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q
@@ -849,6 +866,20 @@ from .models import DDSOperation, DDSArticle, CashRegister
 from .utils import user_hotels_qs
 
 from collections import OrderedDict
+
+@login_required
+def hotel_list(request):
+    hotels = list(user_hotels_qs(request.user).order_by("name"))
+
+    # Берём кассы одним запросом и мапим по hotel_id
+    registers_by_hotel = CashRegister.objects.filter(hotel__in=hotels).in_bulk(field_name="hotel_id")
+
+    # приклеиваем register к каждому отелю (может быть None)
+    for h in hotels:
+        h.register = registers_by_hotel.get(h.id)
+
+    return render(request, "dds/hotel_list.html", {"hotels": hotels})
+
 
 @login_required
 def hotel_detail(request, pk):
@@ -1145,20 +1176,7 @@ def unified_report_export_excel(request):
     wb.save(response)
     return response
 
-from django.contrib import messages
-from django.shortcuts import redirect
-from .forms import CashIncassoForm
-from .models import CashIncasso
 
-from .cash_services import apply_cash_movement
-from .models import CashMovement, CashRegister
-from django.db import transaction
-from .cash_services import apply_cash_movement
-from .models import CashMovement, CashRegister
-from .cash_services import FIELD_MAP  # чтобы знать какое поле проверять
-from django.db import transaction
-from django.core.exceptions import ValidationError
-from .cash_services import apply_cash_movement, FIELD_MAP
 @login_required
 def incasso_create(request, pk):
     hotels_qs = user_hotels_qs(request.user)
