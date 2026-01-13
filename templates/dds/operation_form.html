@@ -46,6 +46,8 @@
 
 <form method="post" class="card app-card" id="ddsForm">
   {% csrf_token %}
+  <input type="hidden" name="kind" value="{{ kind|default:'' }}">
+
   <div class="card-body">
     <div class="row g-2">
       <div class="col-md-6">
@@ -77,6 +79,11 @@
       </div>
 
       <div class="col-12">
+        <label class="form-label">Контрагент</label>
+        {{ form.counterparty }}
+      </div>
+
+      <div class="col-12">
         <label class="form-label">Источник</label>
         {{ form.source }}
       </div>
@@ -85,6 +92,22 @@
         <label class="form-label">Комментарий</label>
         {{ form.comment }}
       </div>
+
+      {% if form.errors %}
+      <div class="col-12">
+        <div class="alert alert-danger mb-0">
+          <b>Ошибки:</b>
+          {{ form.non_field_errors }}
+          <ul class="mb-0">
+            {% for field in form %}
+              {% for error in field.errors %}
+                <li><b>{{ field.label }}:</b> {{ error }}</li>
+              {% endfor %}
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
 
       <div class="col-12 d-flex gap-2">
         <button class="btn btn-primary">Сохранить</button>
@@ -95,6 +118,24 @@
 </form>
 
 <script>
+  (function () {
+    const hotelSelect = document.getElementById("id_hotel");
+    if (!hotelSelect) return;
+
+    hotelSelect.addEventListener("change", function () {
+      const url = new URL(window.location.href);
+      if (this.value) url.searchParams.set("hotel", this.value);
+      else url.searchParams.delete("hotel");
+
+      const kindEl = document.querySelector("input[name='kind']");
+      if (kindEl && kindEl.value) url.searchParams.set("kind", kindEl.value);
+
+      window.location.href = url.toString();
+    });
+  })();
+</script>
+
+<script>
 (function(){
   const balances = document.getElementById("balances");
   if(!balances) return;
@@ -102,6 +143,7 @@
   const form = document.getElementById("ddsForm");
   const methodEl = form.querySelector('[name="method"]');
   const amountEl = form.querySelector('[name="amount"]');
+  const kindEl = form.querySelector('[name="kind"]');
 
   const box1 = document.getElementById("accAvailable");
   const box2 = document.getElementById("accAfter");
@@ -119,9 +161,11 @@
     const bal = getBalance(acc);
     const amt = toNum(amountEl ? amountEl.value : "0");
 
+    const kind = kindEl ? (kindEl.value || "") : "";
+    const after = (kind === "income") ? (bal + amt) : (bal - amt);
+
     box1.textContent = "Доступно по счету: " + bal.toFixed(2);
-    // тут считаем “примерно”, без знания доход/расход. Реально проверка на сервере всё равно есть.
-    box2.textContent = "После операции (примерно): " + (bal - amt).toFixed(2);
+    box2.textContent = "После операции (примерно): " + after.toFixed(2);
   }
 
   if(methodEl) methodEl.addEventListener("change", update);

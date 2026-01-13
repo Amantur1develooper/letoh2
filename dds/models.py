@@ -80,6 +80,13 @@ class DDSArticle(models.Model):
         related_name="articles",
         verbose_name="Категория",
     )
+    hotels = models.ManyToManyField(
+        "Hotel",
+        blank=True,
+        related_name="dds_articles",
+        verbose_name="Отели (где доступна статья)",
+        help_text="Если не выбрать ничего — статья будет доступна во всех отелях.",
+    )
     name = models.CharField(max_length=120, verbose_name="имя")
     is_active = models.BooleanField(default=True, verbose_name="активно?")
 
@@ -346,6 +353,7 @@ class CashTransfer(models.Model):
         indexes = [models.Index(fields=["hotel", "happened_at"])]
 
     def __str__(self):
+        
         
         
         return f"{self.hotel} {self.from_account}->{self.to_account} {self.amount}"

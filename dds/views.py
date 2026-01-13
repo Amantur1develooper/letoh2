@@ -6,13 +6,14 @@ from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from .utils import user_hotels_qs
-from .forms import DDSOperationForm, DDSArticleForm
+from .forms import DDSOpCreateForm, DDSOperationForm, DDSArticleForm
 from .models import DDSOperation, DDSArticle, Hotel
-from decimal import Decimal
+
 from django.db.models import Sum, Q, F
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from openpyxl import Workbook
+from decimal import Decimal, ROUND_HALF_UP
 from django.contrib import messages
 from django.shortcuts import redirect
 from .forms import CashIncassoForm
@@ -493,12 +494,29 @@ def dds_dashboard(request):
     cat_sorted = sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)
     grand_total = sum(cat_totals.values(), Decimal("0.00"))
 
-    expense_cat_percent = {"labels": [], "data": []}
+
+# ...
+
+    expense_cat_percent = {"labels": [], "percent": [], "amounts": [], "grand_total": 0.0}
+
     if grand_total > 0:
+        expense_cat_percent["grand_total"] = float(grand_total)
+
         for name, total in cat_sorted:
+        # точный процент
             pct = (total / grand_total) * Decimal("100")
+            pct = pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
             expense_cat_percent["labels"].append(name)
-            expense_cat_percent["data"].append(float(pct))
+            expense_cat_percent["percent"].append(float(pct))
+            expense_cat_percent["amounts"].append(float(total))
+
+    # expense_cat_percent = {"labels": [], "data": []}
+    # if grand_total > 0:
+    #     for name, total in cat_sorted:
+    #         pct = (total / grand_total) * Decimal("100")
+    #         expense_cat_percent["labels"].append(name)
+    #         expense_cat_percent["data"].append(float(pct))
 
     TOP_N = 8
     pie_labels, pie_data = [], []
@@ -645,65 +663,73 @@ from django.core.exceptions import ValidationError
 
 from .cash_services import apply_cash_movement, FIELD_MAP
 from .models import CashRegister, CashMovement, DDSArticle
-@login_required
-def dds_create(request):
-    hotels_qs = user_hotels_qs(request.user)
-    if not hotels_qs.exists():
-        messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
-        return redirect("dds:dds_list")
+from django.shortcuts import get_object_or_404, redirect, render
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 
-    only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+from .utils import user_hotels_qs
+from .models import CashRegister, DDSArticle
+from .forms import DDSOperationForm
+
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect, render, get_object_or_404
+
+from .utils import user_hotels_qs
+from .models import DDSArticle, CashRegister, DDSOperation
+from .forms import DDSOperationForm
+@login_required
+def dds_op_add(request, hotel_id: int, kind: str):
+    hotels = user_hotels_qs(request.user)
+    hotel = get_object_or_404(hotels, id=hotel_id)
+
+    register, _ = CashRegister.objects.get_or_create(hotel=hotel)
+
+    category_id = request.GET.get("category") or request.POST.get("category") or None
 
     if request.method == "POST":
-        form = DDSOperationForm(request.POST)
-        form.fields["hotel"].queryset = hotels_qs
-        form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
-
-        if only_hotel:
-            form.fields["hotel"].initial = only_hotel
-            form.fields["hotel"].disabled = True
+        form = DDSOpCreateForm(
+            request.POST,
+            kind=kind,
+            category_id=category_id,
+            hotel=hotel,   # ✅ ВАЖНО: без этого будет показывать всё
+        )
 
         if form.is_valid():
             op = form.save(commit=False)
-
-            # если поле отеля disabled — на всякий случай
-            if only_hotel:
-                op.hotel = only_hotel
-
-            if not hotels_qs.filter(id=op.hotel_id).exists():
-                messages.error(request, "Нет доступа к этому отелю.")
-                return redirect("dds:dds_list")
-
+            op.hotel = hotel
             op.created_by = request.user
 
-            is_incasso = (op.source or "").lower() == "incasso"
             direction = CashMovement.IN if op.article.kind == DDSArticle.INCOME else CashMovement.OUT
+            is_incasso = (op.source or "").lower() == "incasso"
 
             try:
                 with transaction.atomic():
-                    # ✅ если расход и не инкассация — проверяем выбранный счет под блокировкой
-                    if (not is_incasso) and direction == CashMovement.OUT:
-                        reg, _ = CashRegister.objects.get_or_create(hotel=op.hotel)
-                        reg = CashRegister.objects.select_for_update().get(pk=reg.pk)
+                    register = CashRegister.objects.select_for_update().get(pk=register.pk)
 
+                    if (not is_incasso) and direction == CashMovement.OUT:
                         field = FIELD_MAP.get(op.method)
                         if not field:
                             messages.error(request, "Неверный способ оплаты/счет.")
-                            return render(request, "dds/operation_form.html", {"form": form})
+                            return render(request, "dds/dds_quick_op_form.html", {
+                                "hotel": hotel, "register": register, "kind": kind,
+                                "form": form, "category_id": category_id or "",
+                            })
 
-                        current = getattr(reg, field) or Decimal("0.00")
+                        current = getattr(register, field) or Decimal("0.00")
                         if op.amount > current:
                             messages.error(
                                 request,
                                 f"Недостаточно средств на счете {op.get_method_display()}. Доступно: {current}"
                             )
-                            return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": op.hotel})
+                            return render(request, "dds/dds_quick_op_form.html", {
+                                "hotel": hotel, "register": register, "kind": kind,
+                                "form": form, "category_id": category_id or "",
+                            })
 
                     op.save()
 
-                    # ✅ двигаем кассу только если это НЕ incasso
                     if not is_incasso:
-                        # защита от дубля (и по check, и по constraint)
                         exists = CashMovement.objects.filter(
                             dds_operation=op,
                             account=op.method,
@@ -713,7 +739,7 @@ def dds_create(request):
                         if not exists:
                             try:
                                 apply_cash_movement(
-                                    hotel=op.hotel,
+                                    hotel=hotel,
                                     account=op.method,
                                     direction=direction,
                                     amount=op.amount,
@@ -723,52 +749,437 @@ def dds_create(request):
                                     dds_operation=op,
                                 )
                             except IntegrityError:
-                                # если POST случайно повторился и constraint сработал
                                 pass
 
             except ValidationError as e:
                 messages.error(request, str(e))
-                return render(request, "dds/operation_form.html", {"form": form})
+                return render(request, "dds/dds_quick_op_form.html", {
+                    "hotel": hotel, "register": register, "kind": kind,
+                    "form": form, "category_id": category_id or "",
+                })
 
-            messages.success(request, "Операция ДДС добавлена.")
-            return redirect("dds:hotel_detail", pk=op.hotel_id)
+            messages.success(request, "Операция сохранена и касса обновлена.")
+            return redirect("dds:hotel_detail", hotel.id)
+
+        messages.error(request, "Исправьте ошибки в форме.")
 
     else:
-        form = DDSOperationForm()
+        form = DDSOpCreateForm(
+            kind=kind,
+            category_id=category_id,
+            hotel=hotel,   # ✅ ВАЖНО
+        )
+
+    return render(request, "dds/dds_quick_op_form.html", {
+        "hotel": hotel,
+        "register": register,
+        "kind": kind,
+        "form": form,
+        "category_id": category_id or "",
+    })
+
+@login_required
+def dds_create(request):
+    hotels_qs = user_hotels_qs(request.user)
+    if not hotels_qs.exists():
+        messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
+        return redirect("dds:dds_list")
+
+    only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+
+    selected_hotel = None
+    if only_hotel:
+        selected_hotel = only_hotel
+    else:
+        hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
+        if hotel_id and hotels_qs.filter(id=hotel_id).exists():
+            selected_hotel = hotels_qs.get(id=hotel_id)
+
+    kind = request.GET.get("kind") or request.POST.get("kind")
+    if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
+        kind = None
+
+    if request.method == "POST":
+        form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
         form.fields["hotel"].queryset = hotels_qs
-        form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
+
 
         if only_hotel:
             form.fields["hotel"].initial = only_hotel
             form.fields["hotel"].disabled = True
 
-    # покажем остатки в форме (если можем определить отель)
-    selected_hotel = only_hotel
-    reg = None
-    if selected_hotel:
-        reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+        # ❌ НЕ ДЕЛАЙ ТАК:
+        # form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
 
-    # return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
+        if form.is_valid():
+            op = form.save(commit=False)
+            
+            
+            if only_hotel:
+            
+                op.hotel = only_hotel
+            op.created_by = request.user
+            op.save()
 
+            messages.success(request, "Операция добавлена.")
+            return redirect("dds:hotel_detail", pk=op.hotel_id)
 
-    reg = None
-    selected_hotel = None
-
-# если один отель — используем его
-    if only_hotel:
-        selected_hotel = only_hotel
     else:
-    # если пользователь выбрал отель в форме
-        hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
-        if hotel_id and hotels_qs.filter(id=hotel_id).exists():
-            selected_hotel = hotels_qs.get(id=hotel_id)
+        form = DDSOperationForm(hotel=selected_hotel, kind=kind)
 
+
+
+        form.fields["hotel"].queryset = hotels_qs
+
+
+
+
+        if selected_hotel:
+            form.fields["hotel"].initial = selected_hotel
+        if only_hotel:
+            form.fields["hotel"].initial = only_hotel
+            form.fields["hotel"].disabled = True
+
+    
+    reg = None
+    
     if selected_hotel:
         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
 
-# return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
+    return render(request, "dds/operation_form.html", {
+        "form": form,
+        "reg": reg,
+        "selected_hotel": selected_hotel,
+        "kind": kind,
+    })
 
-    return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
+# @login_required
+# def dds_create(request):
+#     hotels_qs = user_hotels_qs(request.user)
+#     if not hotels_qs.exists():
+#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
+#         return redirect("dds:dds_list")
+
+#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+
+#     # выбираем отель
+#     selected_hotel = None
+#     if only_hotel:
+#         selected_hotel = only_hotel
+#     else:
+#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
+#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
+#             selected_hotel = hotels_qs.get(id=hotel_id)
+
+#     # (если используешь фильтр kind)
+#     kind = request.GET.get("kind") or request.POST.get("kind")
+#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
+#         kind = None
+
+#     if request.method == "POST":
+#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#         # ❌ НЕ ДЕЛАЙ ТАК:
+#         # form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
+
+#         if form.is_valid():
+#             op = form.save(commit=False)
+
+#             if only_hotel:
+#                 op.hotel = only_hotel
+
+#             op.created_by = request.user
+#             op.save()
+
+#             messages.success(request, "Операция добавлена.")
+#             return redirect("dds:hotel_detail", pk=op.hotel_id)
+
+#     else:
+#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+#         if selected_hotel:
+#             form.fields["hotel"].initial = selected_hotel
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#         # ❌ НЕ ДЕЛАЙ ТАК:
+#         # form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
+
+#     reg = None
+#     if selected_hotel:
+#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+
+#     return render(request, "dds/operation_form.html", {
+#         "form": form,
+#         "reg": reg,
+#         "selected_hotel": selected_hotel,
+#         "kind": kind,
+#     })
+
+# @login_required
+# def dds_create(request):
+#     hotels_qs = user_hotels_qs(request.user)
+#     if not hotels_qs.exists():
+#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
+#         return redirect("dds:dds_list")
+
+#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+
+#     # определяем выбранный отель
+#     selected_hotel = None
+#     if only_hotel:
+#         selected_hotel = only_hotel
+#     else:
+#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
+#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
+#             selected_hotel = hotels_qs.get(id=hotel_id)
+
+#     kind = request.GET.get("kind") or request.POST.get("kind")
+#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
+#         kind = None
+
+#     if request.method == "POST":
+#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#         if form.is_valid():
+#             op = form.save(commit=False)
+
+          
+#             if only_hotel:
+#                 op.hotel = only_hotel
+
+         
+#             op.created_by = request.user
+#             op.save()
+
+#             messages.success(request, "Операция добавлена.")
+#             return redirect("dds:hotel_detail", pk=op.hotel_id)
+
+#     else:
+#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+#         if selected_hotel:
+#             form.fields["hotel"].initial = selected_hotel
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+    
+#     reg = None
+    
+#     if selected_hotel:
+#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+
+#     return render(request, "dds/operation_form.html", {
+#         "form": form,
+#         "reg": reg,
+#         "selected_hotel": selected_hotel,
+#         "kind": kind,
+#     })
+
+
+# @login_required
+# def dds_create(request):
+#     hotels_qs = user_hotels_qs(request.user)
+#     if not hotels_qs.exists():
+#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
+#         return redirect("dds:dds_list")
+
+#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+
+#     # ✅ выбираем отель: если 1 — он, иначе из GET/POST
+#     selected_hotel = None
+#     if only_hotel:
+#         selected_hotel = only_hotel
+#     else:
+#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
+#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
+#             selected_hotel = hotels_qs.get(id=hotel_id)
+
+#     # ✅ (опционально) вид операции через ?kind=income/expense
+#     kind = request.GET.get("kind") or request.POST.get("kind")
+#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
+#         kind = None
+
+#     if request.method == "POST":
+#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#         if form.is_valid():
+#             op = form.save(commit=False)
+#             if only_hotel:
+#                 op.hotel = only_hotel
+
+#             op.created_by = request.user
+#             op.save()
+#             messages.success(request, "Операция добавлена.")
+#             return redirect("dds:hotel_detail", pk=op.hotel_id)
+#     else:
+#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
+#         form.fields["hotel"].queryset = hotels_qs
+
+#         if selected_hotel:
+#             form.fields["hotel"].initial = selected_hotel
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#     reg = None
+#     if selected_hotel:
+#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+
+#     return render(request, "dds/operation_form.html", {
+#         "form": form,
+#         "reg": reg,
+#         "selected_hotel": selected_hotel,
+#         "kind": kind,  # если будешь делать кнопки доход/расход
+#     })
+
+# @login_required
+# def dds_create(request):
+#     hotels_qs = user_hotels_qs(request.user)
+#     if not hotels_qs.exists():
+#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
+#         return redirect("dds:dds_list")
+
+#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
+
+#     if request.method == "POST":
+#         form = DDSOperationForm(request.POST)
+#         form.fields["hotel"].queryset = hotels_qs
+#         form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#         if form.is_valid():
+#             op = form.save(commit=False)
+
+#             # если поле отеля disabled — на всякий случай
+#             if only_hotel:
+#                 op.hotel = only_hotel
+
+#             if not hotels_qs.filter(id=op.hotel_id).exists():
+#                 messages.error(request, "Нет доступа к этому отелю.")
+#                 return redirect("dds:dds_list")
+
+#             op.created_by = request.user
+
+#             is_incasso = (op.source or "").lower() == "incasso"
+#             direction = CashMovement.IN if op.article.kind == DDSArticle.INCOME else CashMovement.OUT
+
+#             try:
+#                 with transaction.atomic():
+#                     # ✅ если расход и не инкассация — проверяем выбранный счет под блокировкой
+#                     if (not is_incasso) and direction == CashMovement.OUT:
+#                         reg, _ = CashRegister.objects.get_or_create(hotel=op.hotel)
+#                         reg = CashRegister.objects.select_for_update().get(pk=reg.pk)
+
+#                         field = FIELD_MAP.get(op.method)
+#                         if not field:
+#                             messages.error(request, "Неверный способ оплаты/счет.")
+#                             return render(request, "dds/operation_form.html", {"form": form})
+
+#                         current = getattr(reg, field) or Decimal("0.00")
+#                         if op.amount > current:
+#                             messages.error(
+#                                 request,
+#                                 f"Недостаточно средств на счете {op.get_method_display()}. Доступно: {current}"
+#                             )
+#                             return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": op.hotel})
+
+#                     op.save()
+
+#                     # ✅ двигаем кассу только если это НЕ incasso
+#                     if not is_incasso:
+#                         # защита от дубля (и по check, и по constraint)
+#                         exists = CashMovement.objects.filter(
+#                             dds_operation=op,
+#                             account=op.method,
+#                             direction=direction,
+#                         ).exists()
+
+#                         if not exists:
+#                             try:
+#                                 apply_cash_movement(
+#                                     hotel=op.hotel,
+#                                     account=op.method,
+#                                     direction=direction,
+#                                     amount=op.amount,
+#                                     created_by=request.user,
+#                                     happened_at=op.happened_at,
+#                                     comment=op.comment,
+#                                     dds_operation=op,
+#                                 )
+#                             except IntegrityError:
+#                                 # если POST случайно повторился и constraint сработал
+#                                 pass
+
+#             except ValidationError as e:
+#                 messages.error(request, str(e))
+#                 return render(request, "dds/operation_form.html", {"form": form})
+
+#             messages.success(request, "Операция ДДС добавлена.")
+#             return redirect("dds:hotel_detail", pk=op.hotel_id)
+
+#     else:
+#         form = DDSOperationForm()
+#         form.fields["hotel"].queryset = hotels_qs
+#         form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
+
+#         if only_hotel:
+#             form.fields["hotel"].initial = only_hotel
+#             form.fields["hotel"].disabled = True
+
+#     # покажем остатки в форме (если можем определить отель)
+#     selected_hotel = only_hotel
+#     reg = None
+#     if selected_hotel:
+#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+
+#     # return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
+
+
+#     reg = None
+#     selected_hotel = None
+
+# # если один отель — используем его
+#     if only_hotel:
+#         selected_hotel = only_hotel
+#     else:
+#     # если пользователь выбрал отель в форме
+#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
+#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
+#             selected_hotel = hotels_qs.get(id=hotel_id)
+
+#     if selected_hotel:
+#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
+
+# # return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
+
+#     return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
 
 
 @login_required

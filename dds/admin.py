@@ -215,14 +215,24 @@ class DDSCategoryAdmin(admin.ModelAdmin):
 # Admin: DDSArticle
 # ----------------------------
 
+from django.contrib import admin
+from .models import Hotel, DDSCategory, DDSArticle, DDSOperation, CashRegister, CashMovement, CashIncasso, CashTransfer
+
 @admin.register(DDSArticle)
 class DDSArticleAdmin(admin.ModelAdmin):
-    list_display = ("name", "kind", "category", "is_active")
+    list_display = ("id", "kind", "name", "category", "is_active", "hotels_list")
     list_filter = ("kind", "is_active", "category")
-    search_fields = ("name", "category__name", "category__parent__name")
-    ordering = ("kind", "category_id", "name")
-    autocomplete_fields = ("category",)
+    search_fields = ("name",)
+    filter_horizontal = ("hotels",)  # ✅ удобно выбирать отели
 
+    def hotels_list(self, obj):
+        qs = obj.hotels.all()[:5]
+        if not obj.hotels.exists():
+            return "Все отели"
+        names = [h.name for h in qs]
+        more = obj.hotels.count() - len(names)
+        return ", ".join(names) + (f" (+{more})" if more > 0 else "")
+    hotels_list.short_description = "Отели"
 
 # ----------------------------
 # Admin: DDSOperation

@@ -359,44 +359,35 @@ from .models import DDSOperation, DDSArticle, CashRegister, CashMovement
 from .utils import user_hotels_qs
 from .cash_services import apply_cash_movement, FIELD_MAP
 
-
 @login_required
 def dds_op_add(request, hotel_id: int, kind: str):
-    """
-    kind: 'income' | 'expense'
-    Создаёт DDSOperation + двигает кассу через CashMovement + CashRegister.
-    Без JSON: категория выбирается через GET (перезагрузка страницы).
-    """
     hotels = user_hotels_qs(request.user)
     hotel = get_object_or_404(hotels, id=hotel_id)
 
     register, _ = CashRegister.objects.get_or_create(hotel=hotel)
 
-    # категория берётся из GET или POST
     category_id = request.GET.get("category") or request.POST.get("category") or None
 
     if request.method == "POST":
-        form = DDSOpCreateForm(request.POST, kind=kind, category_id=category_id)
+        form = DDSOpCreateForm(
+            request.POST,
+            kind=kind,
+            category_id=category_id,
+            hotel=hotel,   # ✅ ВАЖНО: без этого будет показывать всё
+        )
 
         if form.is_valid():
             op = form.save(commit=False)
             op.hotel = hotel
             op.created_by = request.user
 
-            # Важно: опираемся на KIND, а не на "kind" из URL
-            # (если вдруг статью выбрали не того вида — модель не даст, но на всякий)
             direction = CashMovement.IN if op.article.kind == DDSArticle.INCOME else CashMovement.OUT
-
-            # Инкассацию специально можно не двигать через этот экран.
-            # Но если вдруг ты используешь source="incasso" — оставим защиту:
             is_incasso = (op.source or "").lower() == "incasso"
 
             try:
                 with transaction.atomic():
-                    # блокируем кассу
                     register = CashRegister.objects.select_for_update().get(pk=register.pk)
 
-                    # ✅ проверка денег при расходе (если не incasso)
                     if (not is_incasso) and direction == CashMovement.OUT:
                         field = FIELD_MAP.get(op.method)
                         if not field:
@@ -417,12 +408,9 @@ def dds_op_add(request, hotel_id: int, kind: str):
                                 "form": form, "category_id": category_id or "",
                             })
 
-                    # ✅ сохраняем операцию
                     op.save()
 
-                    # ✅ двигаем кассу (если не incasso)
                     if not is_incasso:
-                        # защита от дубля (на случай повторной отправки формы)
                         exists = CashMovement.objects.filter(
                             dds_operation=op,
                             account=op.method,
@@ -442,7 +430,6 @@ def dds_op_add(request, hotel_id: int, kind: str):
                                     dds_operation=op,
                                 )
                             except IntegrityError:
-                                # если constraint сработал (дубль POST) — игнор
                                 pass
 
             except ValidationError as e:
@@ -455,10 +442,14 @@ def dds_op_add(request, hotel_id: int, kind: str):
             messages.success(request, "Операция сохранена и касса обновлена.")
             return redirect("dds:hotel_detail", hotel.id)
 
-        else:
-            messages.error(request, "Исправьте ошибки в форме.")
+        messages.error(request, "Исправьте ошибки в форме.")
+
     else:
-        form = DDSOpCreateForm(kind=kind, category_id=category_id)
+        form = DDSOpCreateForm(
+            kind=kind,
+            category_id=category_id,
+            hotel=hotel,   # ✅ ВАЖНО
+        )
 
     return render(request, "dds/dds_quick_op_form.html", {
         "hotel": hotel,
@@ -467,6 +458,114 @@ def dds_op_add(request, hotel_id: int, kind: str):
         "form": form,
         "category_id": category_id or "",
     })
+
+# @login_required
+# def dds_op_add(request, hotel_id: int, kind: str):
+#     """
+#     kind: 'income' | 'expense'
+#     Создаёт DDSOperation + двигает кассу через CashMovement + CashRegister.
+#     Без JSON: категория выбирается через GET (перезагрузка страницы).
+#     """
+#     hotels = user_hotels_qs(request.user)
+#     hotel = get_object_or_404(hotels, id=hotel_id)
+
+#     register, _ = CashRegister.objects.get_or_create(hotel=hotel)
+
+#     # категория берётся из GET или POST
+#     category_id = request.GET.get("category") or request.POST.get("category") or None
+
+#     if request.method == "POST":
+#         form = DDSOpCreateForm(request.POST, kind=kind, category_id=category_id)
+
+#         if form.is_valid():
+#             op = form.save(commit=False)
+#             op.hotel = hotel
+#             op.created_by = request.user
+
+#             # Важно: опираемся на KIND, а не на "kind" из URL
+#             # (если вдруг статью выбрали не того вида — модель не даст, но на всякий)
+#             direction = CashMovement.IN if op.article.kind == DDSArticle.INCOME else CashMovement.OUT
+
+#             # Инкассацию специально можно не двигать через этот экран.
+#             # Но если вдруг ты используешь source="incasso" — оставим защиту:
+#             is_incasso = (op.source or "").lower() == "incasso"
+
+#             try:
+#                 with transaction.atomic():
+#                     # блокируем кассу
+#                     register = CashRegister.objects.select_for_update().get(pk=register.pk)
+
+#                     # ✅ проверка денег при расходе (если не incasso)
+#                     if (not is_incasso) and direction == CashMovement.OUT:
+#                         field = FIELD_MAP.get(op.method)
+#                         if not field:
+#                             messages.error(request, "Неверный способ оплаты/счет.")
+#                             return render(request, "dds/dds_quick_op_form.html", {
+#                                 "hotel": hotel, "register": register, "kind": kind,
+#                                 "form": form, "category_id": category_id or "",
+#                             })
+
+#                         current = getattr(register, field) or Decimal("0.00")
+#                         if op.amount > current:
+#                             messages.error(
+#                                 request,
+#                                 f"Недостаточно средств на счете {op.get_method_display()}. Доступно: {current}"
+#                             )
+#                             return render(request, "dds/dds_quick_op_form.html", {
+#                                 "hotel": hotel, "register": register, "kind": kind,
+#                                 "form": form, "category_id": category_id or "",
+#                             })
+
+#                     # ✅ сохраняем операцию
+#                     op.save()
+
+#                     # ✅ двигаем кассу (если не incasso)
+#                     if not is_incasso:
+#                         # защита от дубля (на случай повторной отправки формы)
+#                         exists = CashMovement.objects.filter(
+#                             dds_operation=op,
+#                             account=op.method,
+#                             direction=direction,
+#                         ).exists()
+
+#                         if not exists:
+#                             try:
+#                                 apply_cash_movement(
+#                                     hotel=hotel,
+#                                     account=op.method,
+#                                     direction=direction,
+#                                     amount=op.amount,
+#                                     created_by=request.user,
+#                                     happened_at=op.happened_at,
+#                                     comment=op.comment,
+#                                     dds_operation=op,
+#                                 )
+#                             except IntegrityError:
+#                                 # если constraint сработал (дубль POST) — игнор
+#                                 pass
+
+#             except ValidationError as e:
+#                 messages.error(request, str(e))
+#                 return render(request, "dds/dds_quick_op_form.html", {
+#                     "hotel": hotel, "register": register, "kind": kind,
+#                     "form": form, "category_id": category_id or "",
+#                 })
+
+#             messages.success(request, "Операция сохранена и касса обновлена.")
+#             return redirect("dds:hotel_detail", hotel.id)
+
+#         else:
+#             messages.error(request, "Исправьте ошибки в форме.")
+#     else:
+#         form = DDSOpCreateForm(kind=kind, category_id=category_id)
+
+#     return render(request, "dds/dds_quick_op_form.html", {
+#         "hotel": hotel,
+#         "register": register,
+#         "kind": kind,
+#         "form": form,
+#         "category_id": category_id or "",
+#     })
 
 # @login_required
 # def dds_op_add(request, hotel_id: int, kind: str):

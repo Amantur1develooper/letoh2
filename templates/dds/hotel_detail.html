@@ -37,7 +37,7 @@
     <a class="btn btn-outline-dark" href="{% url 'dds:incasso_create' hotel.id %}">Инкассация</a>
      <a class="btn btn-sm btn-primary" href="{% url 'dds:income_add' hotel.id %}">+ Доход</a>
 <a class="btn btn-sm btn-danger" href="{% url 'dds:expense_add' hotel.id %}">+ Расход</a>
-    <a class="btn btn-primary" href="{% url 'dds:dds_create' %}">+ Операция</a>
+    {% comment %} <a class="btn btn-primary" href="{% url 'dds:dds_create' %}">+ Операция</a> {% endcomment %}
   </div>
 </div>
 
