@@ -353,8 +353,9 @@ class CashTransferForm(forms.ModelForm):
             "happened_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "comment": forms.Textarea(attrs={"rows": 2}),
         }
+    def __init__(self, *args, register=None, **kwargs):
 
-    def __init__(self, *args, register: CashRegister | None = None, **kwargs):
+    # def __init__(self, *args, register: CashRegister | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._register = register
 
