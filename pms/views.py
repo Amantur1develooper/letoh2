@@ -31,8 +31,10 @@ except Exception:
     def _user_hotels_qs(user):
         return Hotel.objects.filter(is_active=True)
 
+from typing import Optional
+def _parse_date(s: str) -> Optional[date]:
 
-def _parse_date(s: str) -> date | None:
+# def _parse_date(s: str) -> date | None:
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
