@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-j(tu3l*)bw^24m94op6car)3!fdk()cj2y-orc58f2ndpr+&sn
 DEBUG = True
 ALLOWED_HOSTS = ['*',"cw28462.timeweb.ru", "rayan.kg", "resort.rayan.kg", "vh256.timeweb.ru"]
 # ALLOWED_HOSTS = []
-
+#  Rayanhotel123
 
 # Application definition
 
