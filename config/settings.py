@@ -28,7 +28,7 @@ ALLOWED_HOSTS = ['*',"cw28462.timeweb.ru", "rayan.kg", "resort.rayan.kg", "vh256
 # ALLOWED_HOSTS = []
 #  Rayanhotel123
 
-# Application definition
+# Application definition Rayanhotel123
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -121,12 +121,24 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
-STATIC_URL = '/static/'
- 
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR.parent / "public_html" / "static"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR.parent / "public_html" / "media"
+
+# STATIC_URL = '/static/'
+ 
+# STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+# MEDIA_URL = '/media/'
+# MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
 CSRF_TRUSTED_ORIGINS = [
     "https://173b9765dbb1.ngrok-free.app",
     "https://*.ngrok-free.app",  # чтобы не менять каждый раз при новом URL
