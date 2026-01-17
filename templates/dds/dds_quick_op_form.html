@@ -19,9 +19,9 @@
     <div class="card-body py-2">
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <span class="badge bg-dark">Нал: {{ register.cash_balance|floatformat:2 }}</span>
-        <span class="badge bg-primary">Mkassa: {{ register.mkassa_balance|floatformat:2 }}</span>
+        <span class="badge bg-primary">Банк1: {{ register.mkassa_balance|floatformat:2 }}</span>
         <span class="badge bg-warning text-dark">Задаток: {{ register.zadatok_balance|floatformat:2 }}</span>
-        <span class="badge bg-info text-dark">Оптима: {{ register.optima_balance|floatformat:2 }}</span>
+        <span class="badge bg-info text-dark">Банк2: {{ register.optima_balance|floatformat:2 }}</span>
         <span class="ms-auto text-muted small">Итого: <b>{{ register.total|floatformat:2 }}</b></span>
       </div>
     </div>

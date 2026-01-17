@@ -1,14 +1,14 @@
-from django.shortcuts import render
 from datetime import datetime, time
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from .utils import user_hotels_qs
 from .forms import DDSOpCreateForm, DDSOperationForm, DDSArticleForm
-from .models import DDSOperation, DDSArticle, Hotel
-
+from .models import DDSOperation, DDSArticle, Hotel, DDSArticle, DDSOperation, CashMovement, CashRegister
+from django.db import IntegrityError
+from django.shortcuts import redirect
+from .forms import DDSOperationForm
+from .cash_services import apply_cash_movement
 from django.db.models import Sum, Q, F
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
@@ -18,27 +18,36 @@ from django.contrib import messages
 from django.shortcuts import redirect
 from .forms import CashIncassoForm
 from .models import CashIncasso
-from .models import CashMovement, CashRegister
-from django.db import transaction
-from .models import CashMovement, CashRegister # чтобы знать какое поле проверять
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from .cash_services import apply_cash_movement, FIELD_MAP
+from collections import defaultdict
 from django.db.models import Sum, Q, F
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDate
+from django.shortcuts import redirect, render, get_object_or_404
+from django.db.models.functions import Coalesce, TruncDate
+from django.db.models import Sum, Q
+from .utils import user_hotels_qs
+from django.db import transaction
+from django.contrib import messages
+from django.shortcuts import redirect, render
+from django.contrib.auth.decorators import login_required
+from .forms import DDSOperationForm
+from .models import DDSArticle,DDSArticle, Hotel, DDSOperation, DDSArticle, CashRegister, CashRegister, DDSOperation, DDSOperation, CashMovement, CashRegister, CashMovement, DDSArticle
+from .cash_services import apply_cash_movement, FIELD_MAP
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from .cash_services import apply_cash_movement, FIELD_MAP
+from django.shortcuts import redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from .models import CashRegister, DDSArticle
+from .forms import HotelForm
 from decimal import Decimal
-from datetime import datetime, time
-from django.utils import timezone
-from .models import DDSOperation, DDSArticle
-
-
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q
 from django.db.models.functions import Coalesce, TruncDate
-from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-
-from openpyxl import Workbook
+from collections import OrderedDict
 from openpyxl.styles import Font
 
 def _parse_date(d: str):
@@ -224,44 +233,6 @@ def _user_hotels_qs(user):
     hotel = getattr(getattr(user, "profile", None), "hotel", None)
     return Hotel.objects.filter(id=hotel.id, is_active=True) if hotel else Hotel.objects.none()
 
-from collections import defaultdict
-from decimal import Decimal
-
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q, F
-from django.db.models.functions import Coalesce, TruncDate
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
-from collections import defaultdict
-from decimal import Decimal
-from django.db.models import Sum
-from django.db.models.functions import Coalesce
-from .models import DDSOperation, DDSArticle
-from collections import defaultdict
-from decimal import Decimal
-from django.db.models import Sum
-from django.db.models.functions import Coalesce
-from collections import defaultdict
-from decimal import Decimal
-
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
-from django.db.models.functions import Coalesce, TruncDate
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
-
-from .models import DDSOperation, DDSArticle
-from .utils import user_hotels_qs
-from collections import defaultdict
-from decimal import Decimal
-
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q
-from django.db.models.functions import Coalesce, TruncDate
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
-
-from .models import DDSOperation, DDSArticle
 
 
 @login_required
@@ -495,7 +466,7 @@ def dds_dashboard(request):
     grand_total = sum(cat_totals.values(), Decimal("0.00"))
 
 
-# ...
+
 
     expense_cat_percent = {"labels": [], "percent": [], "amounts": [], "grand_total": 0.0}
 
@@ -511,12 +482,7 @@ def dds_dashboard(request):
             expense_cat_percent["percent"].append(float(pct))
             expense_cat_percent["amounts"].append(float(total))
 
-    # expense_cat_percent = {"labels": [], "data": []}
-    # if grand_total > 0:
-    #     for name, total in cat_sorted:
-    #         pct = (total / grand_total) * Decimal("100")
-    #         expense_cat_percent["labels"].append(name)
-    #         expense_cat_percent["data"].append(float(pct))
+    
 
     TOP_N = 8
     pie_labels, pie_data = [], []
@@ -620,21 +586,7 @@ def dds_list(request):
         },
     )
 
-from django.contrib import messages
-from django.shortcuts import redirect, render
-from django.contrib.auth.decorators import login_required
-from .forms import DDSOperationForm
-from .models import DDSArticle
-from .utils import user_hotels_qs
-from django.db import IntegrityError
-from django.contrib import messages
-from django.shortcuts import redirect, render
-from django.contrib.auth.decorators import login_required
 
-from .forms import DDSOperationForm
-from .models import DDSArticle, DDSOperation, CashMovement
-from .utils import user_hotels_qs
-from .cash_services import apply_cash_movement
 
 
 def _is_rooms_income(op) -> bool:
@@ -648,36 +600,7 @@ def _is_rooms_income(op) -> bool:
         or ("комнат" in name)
     )
 
-from django.db import transaction
-from django.contrib import messages
-from django.shortcuts import redirect, render
-from django.contrib.auth.decorators import login_required
 
-from .forms import DDSOperationForm
-from .models import DDSArticle, DDSOperation, CashMovement
-from .utils import user_hotels_qs
-from .cash_services import apply_cash_movement, FIELD_MAP
-
-from django.db import transaction
-from django.core.exceptions import ValidationError
-
-from .cash_services import apply_cash_movement, FIELD_MAP
-from .models import CashRegister, CashMovement, DDSArticle
-from django.shortcuts import get_object_or_404, redirect, render
-from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-
-from .utils import user_hotels_qs
-from .models import CashRegister, DDSArticle
-from .forms import DDSOperationForm
-
-from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect, render, get_object_or_404
-
-from .utils import user_hotels_qs
-from .models import DDSArticle, CashRegister, DDSOperation
-from .forms import DDSOperationForm
 @login_required
 def dds_op_add(request, hotel_id: int, kind: str):
     hotels = user_hotels_qs(request.user)
@@ -853,333 +776,8 @@ def dds_create(request):
         "kind": kind,
     })
 
-# @login_required
-# def dds_create(request):
-#     hotels_qs = user_hotels_qs(request.user)
-#     if not hotels_qs.exists():
-#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
-#         return redirect("dds:dds_list")
 
-#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
 
-#     # выбираем отель
-#     selected_hotel = None
-#     if only_hotel:
-#         selected_hotel = only_hotel
-#     else:
-#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
-#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
-#             selected_hotel = hotels_qs.get(id=hotel_id)
-
-#     # (если используешь фильтр kind)
-#     kind = request.GET.get("kind") or request.POST.get("kind")
-#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
-#         kind = None
-
-#     if request.method == "POST":
-#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#         # ❌ НЕ ДЕЛАЙ ТАК:
-#         # form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
-
-#         if form.is_valid():
-#             op = form.save(commit=False)
-
-#             if only_hotel:
-#                 op.hotel = only_hotel
-
-#             op.created_by = request.user
-#             op.save()
-
-#             messages.success(request, "Операция добавлена.")
-#             return redirect("dds:hotel_detail", pk=op.hotel_id)
-
-#     else:
-#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-#         if selected_hotel:
-#             form.fields["hotel"].initial = selected_hotel
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#         # ❌ НЕ ДЕЛАЙ ТАК:
-#         # form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
-
-#     reg = None
-#     if selected_hotel:
-#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
-
-#     return render(request, "dds/operation_form.html", {
-#         "form": form,
-#         "reg": reg,
-#         "selected_hotel": selected_hotel,
-#         "kind": kind,
-#     })
-
-# @login_required
-# def dds_create(request):
-#     hotels_qs = user_hotels_qs(request.user)
-#     if not hotels_qs.exists():
-#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
-#         return redirect("dds:dds_list")
-
-#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
-
-#     # определяем выбранный отель
-#     selected_hotel = None
-#     if only_hotel:
-#         selected_hotel = only_hotel
-#     else:
-#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
-#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
-#             selected_hotel = hotels_qs.get(id=hotel_id)
-
-#     kind = request.GET.get("kind") or request.POST.get("kind")
-#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
-#         kind = None
-
-#     if request.method == "POST":
-#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#         if form.is_valid():
-#             op = form.save(commit=False)
-
-          
-#             if only_hotel:
-#                 op.hotel = only_hotel
-
-         
-#             op.created_by = request.user
-#             op.save()
-
-#             messages.success(request, "Операция добавлена.")
-#             return redirect("dds:hotel_detail", pk=op.hotel_id)
-
-#     else:
-#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-#         if selected_hotel:
-#             form.fields["hotel"].initial = selected_hotel
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-    
-#     reg = None
-    
-#     if selected_hotel:
-#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
-
-#     return render(request, "dds/operation_form.html", {
-#         "form": form,
-#         "reg": reg,
-#         "selected_hotel": selected_hotel,
-#         "kind": kind,
-#     })
-
-
-# @login_required
-# def dds_create(request):
-#     hotels_qs = user_hotels_qs(request.user)
-#     if not hotels_qs.exists():
-#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
-#         return redirect("dds:dds_list")
-
-#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
-
-#     # ✅ выбираем отель: если 1 — он, иначе из GET/POST
-#     selected_hotel = None
-#     if only_hotel:
-#         selected_hotel = only_hotel
-#     else:
-#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
-#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
-#             selected_hotel = hotels_qs.get(id=hotel_id)
-
-#     # ✅ (опционально) вид операции через ?kind=income/expense
-#     kind = request.GET.get("kind") or request.POST.get("kind")
-#     if kind not in (DDSArticle.INCOME, DDSArticle.EXPENSE):
-#         kind = None
-
-#     if request.method == "POST":
-#         form = DDSOperationForm(request.POST, hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#         if form.is_valid():
-#             op = form.save(commit=False)
-#             if only_hotel:
-#                 op.hotel = only_hotel
-
-#             op.created_by = request.user
-#             op.save()
-#             messages.success(request, "Операция добавлена.")
-#             return redirect("dds:hotel_detail", pk=op.hotel_id)
-#     else:
-#         form = DDSOperationForm(hotel=selected_hotel, kind=kind)
-#         form.fields["hotel"].queryset = hotels_qs
-
-#         if selected_hotel:
-#             form.fields["hotel"].initial = selected_hotel
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#     reg = None
-#     if selected_hotel:
-#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
-
-#     return render(request, "dds/operation_form.html", {
-#         "form": form,
-#         "reg": reg,
-#         "selected_hotel": selected_hotel,
-#         "kind": kind,  # если будешь делать кнопки доход/расход
-#     })
-
-# @login_required
-# def dds_create(request):
-#     hotels_qs = user_hotels_qs(request.user)
-#     if not hotels_qs.exists():
-#         messages.error(request, "У вас не назначен отель. Обратитесь к администратору.")
-#         return redirect("dds:dds_list")
-
-#     only_hotel = hotels_qs.first() if hotels_qs.count() == 1 else None
-
-#     if request.method == "POST":
-#         form = DDSOperationForm(request.POST)
-#         form.fields["hotel"].queryset = hotels_qs
-#         form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#         if form.is_valid():
-#             op = form.save(commit=False)
-
-#             # если поле отеля disabled — на всякий случай
-#             if only_hotel:
-#                 op.hotel = only_hotel
-
-#             if not hotels_qs.filter(id=op.hotel_id).exists():
-#                 messages.error(request, "Нет доступа к этому отелю.")
-#                 return redirect("dds:dds_list")
-
-#             op.created_by = request.user
-
-#             is_incasso = (op.source or "").lower() == "incasso"
-#             direction = CashMovement.IN if op.article.kind == DDSArticle.INCOME else CashMovement.OUT
-
-#             try:
-#                 with transaction.atomic():
-#                     # ✅ если расход и не инкассация — проверяем выбранный счет под блокировкой
-#                     if (not is_incasso) and direction == CashMovement.OUT:
-#                         reg, _ = CashRegister.objects.get_or_create(hotel=op.hotel)
-#                         reg = CashRegister.objects.select_for_update().get(pk=reg.pk)
-
-#                         field = FIELD_MAP.get(op.method)
-#                         if not field:
-#                             messages.error(request, "Неверный способ оплаты/счет.")
-#                             return render(request, "dds/operation_form.html", {"form": form})
-
-#                         current = getattr(reg, field) or Decimal("0.00")
-#                         if op.amount > current:
-#                             messages.error(
-#                                 request,
-#                                 f"Недостаточно средств на счете {op.get_method_display()}. Доступно: {current}"
-#                             )
-#                             return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": op.hotel})
-
-#                     op.save()
-
-#                     # ✅ двигаем кассу только если это НЕ incasso
-#                     if not is_incasso:
-#                         # защита от дубля (и по check, и по constraint)
-#                         exists = CashMovement.objects.filter(
-#                             dds_operation=op,
-#                             account=op.method,
-#                             direction=direction,
-#                         ).exists()
-
-#                         if not exists:
-#                             try:
-#                                 apply_cash_movement(
-#                                     hotel=op.hotel,
-#                                     account=op.method,
-#                                     direction=direction,
-#                                     amount=op.amount,
-#                                     created_by=request.user,
-#                                     happened_at=op.happened_at,
-#                                     comment=op.comment,
-#                                     dds_operation=op,
-#                                 )
-#                             except IntegrityError:
-#                                 # если POST случайно повторился и constraint сработал
-#                                 pass
-
-#             except ValidationError as e:
-#                 messages.error(request, str(e))
-#                 return render(request, "dds/operation_form.html", {"form": form})
-
-#             messages.success(request, "Операция ДДС добавлена.")
-#             return redirect("dds:hotel_detail", pk=op.hotel_id)
-
-#     else:
-#         form = DDSOperationForm()
-#         form.fields["hotel"].queryset = hotels_qs
-#         form.fields["article"].queryset = DDSArticle.objects.filter(is_active=True)
-
-#         if only_hotel:
-#             form.fields["hotel"].initial = only_hotel
-#             form.fields["hotel"].disabled = True
-
-#     # покажем остатки в форме (если можем определить отель)
-#     selected_hotel = only_hotel
-#     reg = None
-#     if selected_hotel:
-#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
-
-#     # return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
-
-
-#     reg = None
-#     selected_hotel = None
-
-# # если один отель — используем его
-#     if only_hotel:
-#         selected_hotel = only_hotel
-#     else:
-#     # если пользователь выбрал отель в форме
-#         hotel_id = request.POST.get("hotel") if request.method == "POST" else request.GET.get("hotel")
-#         if hotel_id and hotels_qs.filter(id=hotel_id).exists():
-#             selected_hotel = hotels_qs.get(id=hotel_id)
-
-#     if selected_hotel:
-#         reg, _ = CashRegister.objects.get_or_create(hotel=selected_hotel)
-
-# # return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
-
-#     return render(request, "dds/operation_form.html", {"form": form, "reg": reg, "selected_hotel": selected_hotel})
 
 
 @login_required
@@ -1219,12 +817,7 @@ def dds_articles(request):
 
 
 
-from django.contrib.auth.decorators import login_required
-from django.contrib import messages
-from django.shortcuts import render, redirect
-from .models import Hotel
-from .forms import HotelForm
-from .utils import user_hotels_qs  # если ты вынес туда user_hotels_qs
+
 
 @login_required
 def hotel_catalog(request):
@@ -1245,38 +838,7 @@ def hotel_catalog(request):
     return render(request, "dds/hotel_catalog.html", {"hotels": hotels, "form": form, "is_fin_admin": is_fin_admin})
 
 
-from decimal import Decimal
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q
-from django.db.models.functions import Coalesce
-from django.shortcuts import get_object_or_404, render
 
-from .models import Hotel, DDSOperation, DDSArticle
-from .utils import user_hotels_qs
-
-
-
-from decimal import Decimal
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q
-from django.db.models.functions import Coalesce, TruncDate
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
-
-from .models import Hotel, DDSOperation, DDSArticle, CashRegister  # добавь CashRegister если есть
-from .utils import user_hotels_qs
-
-from decimal import Decimal
-from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q
-from django.db.models.functions import Coalesce, TruncDate
-from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
-
-from .models import DDSOperation, DDSArticle, CashRegister
-from .utils import user_hotels_qs
-
-from collections import OrderedDict
 
 @login_required
 def hotel_list(request):

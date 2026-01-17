@@ -117,9 +117,9 @@ class DDSOperation(models.Model):
     
     METHOD_CHOICES = (
         (CASH, "Наличные"),
-        (MKASSA, "Mkassa"),
+        (MKASSA, "Банк1"),
         (ZADATOK, "Задаток"),
-        (OPTIMA, "Оптима"),
+        (OPTIMA, "Банк2"),
     )
 
     hotel = models.ForeignKey(Hotel, on_delete=models.PROTECT, related_name="dds_ops", verbose_name="отель")
@@ -182,9 +182,9 @@ class CashIncasso(models.Model):
 
     METHOD_CHOICES = (
         (CASH, "Наличные"),
-        (MKASSA, "Mkassa"),
+        (MKASSA, "Банк1"),
         (ZADATOK, "Задаток"),
-        (OPTIMA, "Оптима"),
+        (OPTIMA, "Банк2"),
     )
 
     hotel = models.ForeignKey(Hotel, on_delete=models.PROTECT, related_name="incassos", verbose_name="отель")
@@ -251,9 +251,9 @@ class CashMovement(models.Model):
     ACC_OPTIMA = "optima"
     ACCOUNT_CHOICES = (
         (ACC_CASH, "Наличные"),
-        (ACC_MKASSA, "Mkassa"),
+        (ACC_MKASSA, "Банк1"),
         (ACC_ZADATOK, "Задаток"),
-        (ACC_OPTIMA, "Оптима"),
+        (ACC_OPTIMA, "Банк2"),
     )
 
     register = models.ForeignKey(CashRegister, on_delete=models.PROTECT, related_name="movements")
