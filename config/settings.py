@@ -24,7 +24,7 @@ SECRET_KEY = 'django-insecure-j(tu3l*)bw^24m94op6car)3!fdk()cj2y-orc58f2ndpr+&sn
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-ALLOWED_HOSTS = ['*',"cw28462.timeweb.ru", "rayan.kg", "resort.rayan.kg", "vh256.timeweb.ru"]
+ALLOWED_HOSTS = ['*',"cw28462.timeweb.ru",'163.245.218.126', "rayan.kg", "resort.rayan.kg", "vh256.timeweb.ru"]
 # ALLOWED_HOSTS = []
 #  Rayanhotel123
 
@@ -124,9 +124,8 @@ USE_TZ = True
 
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR.parent / "public_html" / "static"
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR.parent / "public_html" / "media"
