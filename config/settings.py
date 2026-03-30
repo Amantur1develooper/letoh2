@@ -85,7 +85,7 @@ DATABASES = {
 }
 
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "dds:dds_dashboard"
+LOGIN_REDIRECT_URL = "dds:hotel_list"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
 
 # Password validation

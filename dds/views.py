@@ -48,7 +48,8 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q
 from django.db.models.functions import Coalesce, TruncDate
 from collections import OrderedDict
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 
 def _parse_date(d: str):
     try:
@@ -62,6 +63,57 @@ def _day_range(date_obj):
     start = timezone.make_aware(datetime.combine(date_obj, time.min))
     end = timezone.make_aware(datetime.combine(date_obj, time.max))
     return start, end
+
+
+# ── Excel helpers ────────────────────────────────────────────────────────────
+_HDR_FILL   = PatternFill("solid", fgColor="1F4E79")   # тёмно-синий
+_HDR_FONT   = Font(bold=True, color="FFFFFF", size=10)
+_TOTAL_FILL = PatternFill("solid", fgColor="BDD7EE")   # светло-голубой
+_TOTAL_FONT = Font(bold=True, size=10)
+_THIN       = Side(style="thin", color="AAAAAA")
+_BORDER     = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+_NUM_FMT    = '#,##0.00'
+
+
+def _xl_hdr(ws, row, headers):
+    """Запись + стилизация строки заголовка."""
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=row, column=col, value=h)
+        c.fill = _HDR_FILL
+        c.font = _HDR_FONT
+        c.border = _BORDER
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[row].height = 20
+
+
+def _xl_row(ws, row, values, money_cols=()):
+    """Запись + стилизация строки данных."""
+    for col, val in enumerate(values, 1):
+        c = ws.cell(row=row, column=col, value=val)
+        c.border = _BORDER
+        if col in money_cols:
+            c.number_format = _NUM_FMT
+            c.alignment = Alignment(horizontal="right")
+
+
+def _xl_total_row(ws, row, values, money_cols=()):
+    """Запись + стилизация итоговой строки."""
+    for col, val in enumerate(values, 1):
+        c = ws.cell(row=row, column=col, value=val)
+        c.fill = _TOTAL_FILL
+        c.font = _TOTAL_FONT
+        c.border = _BORDER
+        if col in money_cols:
+            c.number_format = _NUM_FMT
+            c.alignment = Alignment(horizontal="right")
+
+
+def _xl_widths(ws, pairs):
+    """Установка ширины колонок: pairs = [('A', 20), ('B', 14), ...]."""
+    for letter, w in pairs:
+        ws.column_dimensions[letter].width = w
+# ────────────────────────────────────────────────────────────────────────────
+
 
 @login_required
 def hotel_detail_export_excel(request, pk):
@@ -110,39 +162,55 @@ def hotel_detail_export_excel(request, pk):
 
     wb = Workbook()
 
-    # Sheet 1: Summary
+    # ── Лист 1: Итоги ──────────────────────────────────────────────────────
     ws1 = wb.active
     ws1.title = "Итоги"
-    header_font = Font(bold=True)
+    label_font = Font(bold=True, size=11)
+    for row_n, label in enumerate(["Отель", "Период", "", "Приход", "Расход", "Остаток"], 1):
+        ws1.cell(row=row_n, column=1, value=label).font = label_font
+    ws1.cell(row=1, column=2, value=hotel.name)
+    ws1.cell(row=2, column=2, value=f"{date_from or '—'} → {date_to or '—'}")
 
-    ws1["A1"] = "Отель"; ws1["B1"] = hotel.name
-    ws1["A2"] = "Период"
-    ws1["B2"] = f"{date_from or '—'} → {date_to or '—'}"
-    ws1["A4"] = "Приход"; ws1["B4"] = float(income_total)
-    ws1["A5"] = "Расход"; ws1["B5"] = float(expense_total)
-    ws1["A6"] = "Остаток"; ws1["B6"] = float(balance)
+    for row_n, val, fill_clr in [
+        (4, float(income_total),  "E2EFDA"),
+        (5, float(expense_total), "FCE4D6"),
+        (6, float(balance),       "DDEEFF"),
+    ]:
+        fill = PatternFill("solid", fgColor=fill_clr)
+        ws1.cell(row=row_n, column=1).fill = fill
+        c = ws1.cell(row=row_n, column=2, value=val)
+        c.number_format = _NUM_FMT
+        c.alignment = Alignment(horizontal="right")
+        c.border = _BORDER
+        c.fill = fill
 
-    for cell in ("A1","A2","A4","A5","A6"):
-        ws1[cell].font = header_font
+    _xl_widths(ws1, [("A", 14), ("B", 32)])
 
-    # Sheet 2: Rooms by day
+    # ── Лист 2: Номера по дням ─────────────────────────────────────────────
     ws2 = wb.create_sheet("Номера по дням")
-    ws2.append(["Дата", "Доход с номеров"])
-    ws2["A1"].font = header_font
-    ws2["B1"].font = header_font
+    _xl_hdr(ws2, 1, ["Дата", "Доход с номеров"])
+    ws2.freeze_panes = "A2"
 
-    for r in rooms_by_day:
-        ws2.append([r["day"].strftime("%Y-%m-%d") if r["day"] else "", float(r["total"])])
+    rooms_list = list(rooms_by_day)
+    rooms_total = Decimal("0.00")
+    for i, r in enumerate(rooms_list, 2):
+        _xl_row(ws2, i,
+                [r["day"].strftime("%d.%m.%Y") if r["day"] else "", float(r["total"])],
+                money_cols=(2,))
+        rooms_total += r["total"]
+    _xl_total_row(ws2, len(rooms_list) + 2,
+                  ["ИТОГО", float(rooms_total)], money_cols=(2,))
+    _xl_widths(ws2, [("A", 14), ("B", 20)])
 
-    # Sheet 3: Operations
+    # ── Лист 3: Операции ──────────────────────────────────────────────────
     ws3 = wb.create_sheet("Операции")
-    ws3.append(["Дата", "Тип", "Статья", "Способ", "Сумма", "Контрагент", "Источник", "Комментарий"])
-    for c in range(1, 9):
-        ws3.cell(row=1, column=c).font = header_font
+    _xl_hdr(ws3, 1, ["Дата", "Тип", "Статья", "Способ", "Сумма", "Контрагент", "Источник", "Комментарий"])
+    ws3.freeze_panes = "A2"
 
-    for op in ops.order_by("happened_at"):
-        ws3.append([
-            op.happened_at.strftime("%Y-%m-%d %H:%M"),
+    ops_list = list(ops.order_by("happened_at"))
+    for i, op in enumerate(ops_list, 2):
+        _xl_row(ws3, i, [
+            op.happened_at.strftime("%d.%m.%Y %H:%M"),
             op.article.get_kind_display(),
             op.article.name,
             op.get_method_display(),
@@ -150,9 +218,15 @@ def hotel_detail_export_excel(request, pk):
             op.counterparty or "",
             op.source or "",
             (op.comment or "")[:500],
-        ])
+        ], money_cols=(5,))
+    _xl_widths(ws3, [
+        ("A", 16), ("B", 9), ("C", 28), ("D", 12),
+        ("E", 14), ("F", 22), ("G", 12), ("H", 35),
+    ])
 
-    filename = f"hotel_{hotel.id}_dds.xlsx"
+    df = date_from.strftime("%Y%m%d") if date_from else "start"
+    dt = date_to.strftime("%Y%m%d") if date_to else "end"
+    filename = f"hotel_{hotel.id}_dds_{df}_{dt}.xlsx"
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1086,62 +1160,75 @@ def unified_report_export_excel(request):
         .order_by("article__kind", "-total", "article__name")
     )
 
-    # --- Excel ---
+    # ── Excel ──────────────────────────────────────────────────────────────
     wb = Workbook()
-    header_font = Font(bold=True)
+    label_font = Font(bold=True, size=11)
 
     # Лист 1: Итоги
     ws1 = wb.active
     ws1.title = "Итоги"
-    ws1["A1"] = "Отчет"; ws1["B1"] = "Единый отчет по сети (ДДС)"
-    ws1["A2"] = "Период"; ws1["B2"] = f"{date_from or '—'} → {date_to or '—'}"
-    ws1["A4"] = "Итого приход"; ws1["B4"] = float(total_income)
-    ws1["A5"] = "Итого расход"; ws1["B5"] = float(total_expense)
-    ws1["A6"] = "Итого остаток"; ws1["B6"] = float(total_balance)
+    ws1.cell(row=1, column=1, value="Отчет").font  = label_font
+    ws1.cell(row=1, column=2, value="Единый отчет по сети (ДДС)")
+    ws1.cell(row=2, column=1, value="Период").font = label_font
+    ws1.cell(row=2, column=2, value=f"{date_from or '—'} → {date_to or '—'}")
 
-    for cell in ("A1", "A2", "A4", "A5", "A6"):
-        ws1[cell].font = header_font
+    for row_n, label, val, fill_clr in [
+        (4, "Итого приход",  float(total_income),  "E2EFDA"),
+        (5, "Итого расход",  float(total_expense), "FCE4D6"),
+        (6, "Итого остаток", float(total_balance), "DDEEFF"),
+    ]:
+        fill = PatternFill("solid", fgColor=fill_clr)
+        lc = ws1.cell(row=row_n, column=1, value=label)
+        lc.font = label_font; lc.fill = fill
+        vc = ws1.cell(row=row_n, column=2, value=val)
+        vc.number_format = _NUM_FMT
+        vc.alignment = Alignment(horizontal="right")
+        vc.border = _BORDER
+        vc.fill = fill
 
-    ws1.column_dimensions["A"].width = 18
-    ws1.column_dimensions["B"].width = 40
+    _xl_widths(ws1, [("A", 18), ("B", 40)])
 
     # Лист 2: По отелям
     ws2 = wb.create_sheet("По отелям")
-    ws2.append(["Отель", "Приход", "Расход", "Остаток"])
-    for c in range(1, 5):
-        ws2.cell(row=1, column=c).font = header_font
+    _xl_hdr(ws2, 1, ["Отель", "Приход", "Расход", "Остаток"])
+    ws2.freeze_panes = "A2"
 
-    for r in by_hotels:
-        ws2.append([
+    hotels_list = list(by_hotels)
+    for i, r in enumerate(hotels_list, 2):
+        _xl_row(ws2, i, [
             r["hotel__name"],
             float(r["income"]),
             float(r["expense"]),
             float(r["balance"]),
-        ])
-
-    ws2.column_dimensions["A"].width = 30
-    ws2.column_dimensions["B"].width = 14
-    ws2.column_dimensions["C"].width = 14
-    ws2.column_dimensions["D"].width = 14
+        ], money_cols=(2, 3, 4))
+    _xl_total_row(ws2, len(hotels_list) + 2,
+                  ["ИТОГО", float(total_income), float(total_expense), float(total_balance)],
+                  money_cols=(2, 3, 4))
+    _xl_widths(ws2, [("A", 32), ("B", 16), ("C", 16), ("D", 16)])
 
     # Лист 3: По статьям
     ws3 = wb.create_sheet("По статьям")
-    ws3.append(["Тип", "Статья", "Сумма"])
-    for c in range(1, 4):
-        ws3.cell(row=1, column=c).font = header_font
+    _xl_hdr(ws3, 1, ["Тип", "Статья", "Сумма"])
+    ws3.freeze_panes = "A2"
 
-    for r in by_articles:
-        ws3.append([
-            "Доход" if r["article__kind"] == DDSArticle.INCOME else "Расход",
-            r["article__name"],
-            float(r["total"]),
-        ])
+    articles_list = list(by_articles)
+    inc_total_art = Decimal("0.00")
+    exp_total_art = Decimal("0.00")
+    for i, r in enumerate(articles_list, 2):
+        kind_label = "Доход" if r["article__kind"] == DDSArticle.INCOME else "Расход"
+        _xl_row(ws3, i, [kind_label, r["article__name"], float(r["total"])], money_cols=(3,))
+        if r["article__kind"] == DDSArticle.INCOME:
+            inc_total_art += r["total"]
+        else:
+            exp_total_art += r["total"]
+    last = len(articles_list) + 2
+    _xl_total_row(ws3, last,     ["Доход",  "ИТОГО доход",  float(inc_total_art)], money_cols=(3,))
+    _xl_total_row(ws3, last + 1, ["Расход", "ИТОГО расход", float(exp_total_art)], money_cols=(3,))
+    _xl_widths(ws3, [("A", 10), ("B", 38), ("C", 16)])
 
-    ws3.column_dimensions["A"].width = 10
-    ws3.column_dimensions["B"].width = 35
-    ws3.column_dimensions["C"].width = 14
-
-    filename = "akcha_hotel_unified_report.xlsx"
+    df = date_from.strftime("%Y%m%d") if date_from else "start"
+    dt = date_to.strftime("%Y%m%d") if date_to else "end"
+    filename = f"unified_report_{df}_{dt}.xlsx"
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1308,58 +1395,83 @@ def accounting_export_excel(request):
         expenses = expenses.filter(happened_at__lte=end)
         incassos = incassos.filter(happened_at__lte=end)
 
-    wb = Workbook()
-    header_font = Font(bold=True)
-
-    ws1 = wb.active
-    ws1.title = "Итоги"
-    ws1["A1"] = "Период"; ws1["B1"] = f"{date_from or '—'} → {date_to or '—'}"
-    ws1["A2"] = "Фильтр отеля"; ws1["B2"] = hotel_id or "Все"
-
     exp_total = expenses.aggregate(s=Coalesce(Sum("amount"), Decimal("0.00")))["s"]
     inc_total = incassos.aggregate(s=Coalesce(Sum("amount"), Decimal("0.00")))["s"]
 
-    ws1["A4"] = "Расходы (без инкассации)"; ws1["B4"] = float(exp_total)
-    ws1["A5"] = "Инкассации"; ws1["B5"] = float(inc_total)
+    wb = Workbook()
+    label_font = Font(bold=True, size=11)
 
-    for c in ("A1","A2","A4","A5"):
-        ws1[c].font = header_font
+    # ── Лист 1: Итоги ──────────────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = "Итоги"
+    ws1.cell(row=1, column=1, value="Период").font    = label_font
+    ws1.cell(row=1, column=2, value=f"{date_from or '—'} → {date_to or '—'}")
+    ws1.cell(row=2, column=1, value="Отель").font     = label_font
+    ws1.cell(row=2, column=2, value=hotel_id or "Все")
 
+    for row_n, label, val, fill_clr in [
+        (4, "Расходы (без инкассации)", float(exp_total), "FCE4D6"),
+        (5, "Инкассации",               float(inc_total), "FFF2CC"),
+    ]:
+        fill = PatternFill("solid", fgColor=fill_clr)
+        lc = ws1.cell(row=row_n, column=1, value=label)
+        lc.font = label_font; lc.fill = fill
+        vc = ws1.cell(row=row_n, column=2, value=val)
+        vc.number_format = _NUM_FMT
+        vc.alignment = Alignment(horizontal="right")
+        vc.border = _BORDER
+        vc.fill = fill
+
+    _xl_widths(ws1, [("A", 28), ("B", 32)])
+
+    # ── Лист 2: Расходы ───────────────────────────────────────────────────
     ws2 = wb.create_sheet("Расходы")
-    ws2.append(["Дата", "Отель", "Статья", "Способ", "Сумма", "Контрагент", "Комментарий"])
-    for i in range(1, 8):
-        ws2.cell(row=1, column=i).font = header_font
+    _xl_hdr(ws2, 1, ["Дата", "Отель", "Статья", "Способ", "Сумма", "Контрагент", "Комментарий"])
+    ws2.freeze_panes = "A2"
 
-    for op in expenses.order_by("happened_at"):
-        ws2.append([
-            op.happened_at.strftime("%Y-%m-%d %H:%M"),
+    expenses_list = list(expenses.order_by("happened_at"))
+    for i, op in enumerate(expenses_list, 2):
+        _xl_row(ws2, i, [
+            op.happened_at.strftime("%d.%m.%Y %H:%M"),
             op.hotel.name,
             op.article.name,
             op.get_method_display(),
             float(op.amount),
             op.counterparty or "",
             (op.comment or "")[:500],
-        ])
+        ], money_cols=(5,))
+    _xl_total_row(ws2, len(expenses_list) + 2,
+                  ["", "", "", "ИТОГО", float(exp_total), "", ""], money_cols=(5,))
+    _xl_widths(ws2, [
+        ("A", 16), ("B", 22), ("C", 28), ("D", 12), ("E", 14), ("F", 22), ("G", 35),
+    ])
 
+    # ── Лист 3: Инкассации ────────────────────────────────────────────────
     ws3 = wb.create_sheet("Инкассации")
-    ws3.append(["Дата", "Отель", "Способ", "Сумма", "Комментарий", "Создал"])
-    for i in range(1, 7):
-        ws3.cell(row=1, column=i).font = header_font
+    _xl_hdr(ws3, 1, ["Дата", "Отель", "Способ", "Сумма", "Комментарий", "Создал"])
+    ws3.freeze_panes = "A2"
 
-    for inc in incassos.order_by("happened_at"):
-        ws3.append([
-            inc.happened_at.strftime("%Y-%m-%d %H:%M"),
+    incasso_list = list(incassos.order_by("happened_at"))
+    for i, inc in enumerate(incasso_list, 2):
+        _xl_row(ws3, i, [
+            inc.happened_at.strftime("%d.%m.%Y %H:%M"),
             inc.hotel.name,
             inc.get_method_display(),
             float(inc.amount),
             (inc.comment or "")[:500],
             getattr(inc.created_by, "username", ""),
-        ])
+        ], money_cols=(4,))
+    _xl_total_row(ws3, len(incasso_list) + 2,
+                  ["", "", "ИТОГО", float(inc_total), "", ""], money_cols=(4,))
+    _xl_widths(ws3, [("A", 16), ("B", 22), ("C", 12), ("D", 14), ("E", 35), ("F", 16)])
 
-    filename = "akcha_hotel_accounting.xlsx"
+    df = date_from.strftime("%Y%m%d") if date_from else "start"
+    dt = date_to.strftime("%Y%m%d") if date_to else "end"
+    filename = f"accounting_{df}_{dt}.xlsx"
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(response)
     return response
+
