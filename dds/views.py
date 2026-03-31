@@ -73,6 +73,15 @@ _TOTAL_FONT = Font(bold=True, size=10)
 _THIN       = Side(style="thin", color="AAAAAA")
 _BORDER     = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _NUM_FMT    = '#,##0.00'
+_PCT_FMT    = '0.00%'
+
+
+def _pct(part, total):
+    """Доля part/total в виде 0.0–1.0 для Excel-формата '0.00%'."""
+    try:
+        return float(part) / float(total) if total else 0.0
+    except (TypeError, ZeroDivisionError):
+        return 0.0
 
 
 def _xl_hdr(ws, row, headers):
@@ -86,7 +95,7 @@ def _xl_hdr(ws, row, headers):
     ws.row_dimensions[row].height = 20
 
 
-def _xl_row(ws, row, values, money_cols=()):
+def _xl_row(ws, row, values, money_cols=(), pct_cols=()):
     """Запись + стилизация строки данных."""
     for col, val in enumerate(values, 1):
         c = ws.cell(row=row, column=col, value=val)
@@ -94,9 +103,12 @@ def _xl_row(ws, row, values, money_cols=()):
         if col in money_cols:
             c.number_format = _NUM_FMT
             c.alignment = Alignment(horizontal="right")
+        elif col in pct_cols:
+            c.number_format = _PCT_FMT
+            c.alignment = Alignment(horizontal="right")
 
 
-def _xl_total_row(ws, row, values, money_cols=()):
+def _xl_total_row(ws, row, values, money_cols=(), pct_cols=()):
     """Запись + стилизация итоговой строки."""
     for col, val in enumerate(values, 1):
         c = ws.cell(row=row, column=col, value=val)
@@ -105,6 +117,9 @@ def _xl_total_row(ws, row, values, money_cols=()):
         c.border = _BORDER
         if col in money_cols:
             c.number_format = _NUM_FMT
+            c.alignment = Alignment(horizontal="right")
+        elif col in pct_cols:
+            c.number_format = _PCT_FMT
             c.alignment = Alignment(horizontal="right")
 
 
@@ -188,40 +203,43 @@ def hotel_detail_export_excel(request, pk):
 
     # ── Лист 2: Номера по дням ─────────────────────────────────────────────
     ws2 = wb.create_sheet("Номера по дням")
-    _xl_hdr(ws2, 1, ["Дата", "Доход с номеров"])
+    _xl_hdr(ws2, 1, ["Дата", "Доход с номеров", "% от итого"])
     ws2.freeze_panes = "A2"
 
     rooms_list = list(rooms_by_day)
-    rooms_total = Decimal("0.00")
+    rooms_total = sum((r["total"] for r in rooms_list), Decimal("0.00"))
     for i, r in enumerate(rooms_list, 2):
-        _xl_row(ws2, i,
-                [r["day"].strftime("%d.%m.%Y") if r["day"] else "", float(r["total"])],
-                money_cols=(2,))
-        rooms_total += r["total"]
+        _xl_row(ws2, i, [
+            r["day"].strftime("%d.%m.%Y") if r["day"] else "",
+            float(r["total"]),
+            _pct(r["total"], rooms_total),
+        ], money_cols=(2,), pct_cols=(3,))
     _xl_total_row(ws2, len(rooms_list) + 2,
-                  ["ИТОГО", float(rooms_total)], money_cols=(2,))
-    _xl_widths(ws2, [("A", 14), ("B", 20)])
+                  ["ИТОГО", float(rooms_total), 1.0], money_cols=(2,), pct_cols=(3,))
+    _xl_widths(ws2, [("A", 14), ("B", 20), ("C", 12)])
 
     # ── Лист 3: Операции ──────────────────────────────────────────────────
     ws3 = wb.create_sheet("Операции")
-    _xl_hdr(ws3, 1, ["Дата", "Тип", "Статья", "Способ", "Сумма", "Контрагент", "Источник", "Комментарий"])
+    _xl_hdr(ws3, 1, ["Дата", "Тип", "Статья", "Способ", "Сумма", "% от типа", "Контрагент", "Источник", "Комментарий"])
     ws3.freeze_panes = "A2"
 
     ops_list = list(ops.order_by("happened_at"))
     for i, op in enumerate(ops_list, 2):
+        type_total = income_total if op.article.kind == DDSArticle.INCOME else expense_total
         _xl_row(ws3, i, [
             op.happened_at.strftime("%d.%m.%Y %H:%M"),
             op.article.get_kind_display(),
             op.article.name,
             op.get_method_display(),
             float(op.amount),
+            _pct(op.amount, type_total),
             op.counterparty or "",
             op.source or "",
             (op.comment or "")[:500],
-        ], money_cols=(5,))
+        ], money_cols=(5,), pct_cols=(6,))
     _xl_widths(ws3, [
         ("A", 16), ("B", 9), ("C", 28), ("D", 12),
-        ("E", 14), ("F", 22), ("G", 12), ("H", 35),
+        ("E", 14), ("F", 10), ("G", 22), ("H", 12), ("I", 35),
     ])
 
     df = date_from.strftime("%Y%m%d") if date_from else "start"
@@ -1190,7 +1208,7 @@ def unified_report_export_excel(request):
 
     # Лист 2: По отелям
     ws2 = wb.create_sheet("По отелям")
-    _xl_hdr(ws2, 1, ["Отель", "Приход", "Расход", "Остаток"])
+    _xl_hdr(ws2, 1, ["Отель", "Приход", "% прих.", "Расход", "% расх.", "Остаток"])
     ws2.freeze_panes = "A2"
 
     hotels_list = list(by_hotels)
@@ -1198,33 +1216,40 @@ def unified_report_export_excel(request):
         _xl_row(ws2, i, [
             r["hotel__name"],
             float(r["income"]),
+            _pct(r["income"], total_income),
             float(r["expense"]),
+            _pct(r["expense"], total_expense),
             float(r["balance"]),
-        ], money_cols=(2, 3, 4))
+        ], money_cols=(2, 4, 6), pct_cols=(3, 5))
     _xl_total_row(ws2, len(hotels_list) + 2,
-                  ["ИТОГО", float(total_income), float(total_expense), float(total_balance)],
-                  money_cols=(2, 3, 4))
-    _xl_widths(ws2, [("A", 32), ("B", 16), ("C", 16), ("D", 16)])
+                  ["ИТОГО", float(total_income), 1.0, float(total_expense), 1.0, float(total_balance)],
+                  money_cols=(2, 4, 6), pct_cols=(3, 5))
+    _xl_widths(ws2, [("A", 32), ("B", 16), ("C", 10), ("D", 16), ("E", 10), ("F", 16)])
 
     # Лист 3: По статьям
     ws3 = wb.create_sheet("По статьям")
-    _xl_hdr(ws3, 1, ["Тип", "Статья", "Сумма"])
+    _xl_hdr(ws3, 1, ["Тип", "Статья", "Сумма", "% от типа"])
     ws3.freeze_panes = "A2"
 
     articles_list = list(by_articles)
-    inc_total_art = Decimal("0.00")
-    exp_total_art = Decimal("0.00")
+    inc_total_art = sum(
+        (r["total"] for r in articles_list if r["article__kind"] == DDSArticle.INCOME),
+        Decimal("0.00"),
+    )
+    exp_total_art = sum(
+        (r["total"] for r in articles_list if r["article__kind"] != DDSArticle.INCOME),
+        Decimal("0.00"),
+    )
     for i, r in enumerate(articles_list, 2):
         kind_label = "Доход" if r["article__kind"] == DDSArticle.INCOME else "Расход"
-        _xl_row(ws3, i, [kind_label, r["article__name"], float(r["total"])], money_cols=(3,))
-        if r["article__kind"] == DDSArticle.INCOME:
-            inc_total_art += r["total"]
-        else:
-            exp_total_art += r["total"]
+        type_total = inc_total_art if r["article__kind"] == DDSArticle.INCOME else exp_total_art
+        _xl_row(ws3, i, [
+            kind_label, r["article__name"], float(r["total"]), _pct(r["total"], type_total),
+        ], money_cols=(3,), pct_cols=(4,))
     last = len(articles_list) + 2
-    _xl_total_row(ws3, last,     ["Доход",  "ИТОГО доход",  float(inc_total_art)], money_cols=(3,))
-    _xl_total_row(ws3, last + 1, ["Расход", "ИТОГО расход", float(exp_total_art)], money_cols=(3,))
-    _xl_widths(ws3, [("A", 10), ("B", 38), ("C", 16)])
+    _xl_total_row(ws3, last,     ["Доход",  "ИТОГО доход",  float(inc_total_art), 1.0], money_cols=(3,), pct_cols=(4,))
+    _xl_total_row(ws3, last + 1, ["Расход", "ИТОГО расход", float(exp_total_art), 1.0], money_cols=(3,), pct_cols=(4,))
+    _xl_widths(ws3, [("A", 10), ("B", 38), ("C", 16), ("D", 12)])
 
     df = date_from.strftime("%Y%m%d") if date_from else "start"
     dt = date_to.strftime("%Y%m%d") if date_to else "end"
@@ -1426,7 +1451,7 @@ def accounting_export_excel(request):
 
     # ── Лист 2: Расходы ───────────────────────────────────────────────────
     ws2 = wb.create_sheet("Расходы")
-    _xl_hdr(ws2, 1, ["Дата", "Отель", "Статья", "Способ", "Сумма", "Контрагент", "Комментарий"])
+    _xl_hdr(ws2, 1, ["Дата", "Отель", "Статья", "Способ", "Сумма", "% от итого", "Контрагент", "Комментарий"])
     ws2.freeze_panes = "A2"
 
     expenses_list = list(expenses.order_by("happened_at"))
@@ -1437,18 +1462,20 @@ def accounting_export_excel(request):
             op.article.name,
             op.get_method_display(),
             float(op.amount),
+            _pct(op.amount, exp_total),
             op.counterparty or "",
             (op.comment or "")[:500],
-        ], money_cols=(5,))
+        ], money_cols=(5,), pct_cols=(6,))
     _xl_total_row(ws2, len(expenses_list) + 2,
-                  ["", "", "", "ИТОГО", float(exp_total), "", ""], money_cols=(5,))
+                  ["", "", "", "ИТОГО", float(exp_total), 1.0, "", ""],
+                  money_cols=(5,), pct_cols=(6,))
     _xl_widths(ws2, [
-        ("A", 16), ("B", 22), ("C", 28), ("D", 12), ("E", 14), ("F", 22), ("G", 35),
+        ("A", 16), ("B", 22), ("C", 28), ("D", 12), ("E", 14), ("F", 10), ("G", 22), ("H", 35),
     ])
 
     # ── Лист 3: Инкассации ────────────────────────────────────────────────
     ws3 = wb.create_sheet("Инкассации")
-    _xl_hdr(ws3, 1, ["Дата", "Отель", "Способ", "Сумма", "Комментарий", "Создал"])
+    _xl_hdr(ws3, 1, ["Дата", "Отель", "Способ", "Сумма", "% от итого", "Комментарий", "Создал"])
     ws3.freeze_panes = "A2"
 
     incasso_list = list(incassos.order_by("happened_at"))
@@ -1458,12 +1485,14 @@ def accounting_export_excel(request):
             inc.hotel.name,
             inc.get_method_display(),
             float(inc.amount),
+            _pct(inc.amount, inc_total),
             (inc.comment or "")[:500],
             getattr(inc.created_by, "username", ""),
-        ], money_cols=(4,))
+        ], money_cols=(4,), pct_cols=(5,))
     _xl_total_row(ws3, len(incasso_list) + 2,
-                  ["", "", "ИТОГО", float(inc_total), "", ""], money_cols=(4,))
-    _xl_widths(ws3, [("A", 16), ("B", 22), ("C", 12), ("D", 14), ("E", 35), ("F", 16)])
+                  ["", "", "ИТОГО", float(inc_total), 1.0, "", ""],
+                  money_cols=(4,), pct_cols=(5,))
+    _xl_widths(ws3, [("A", 16), ("B", 22), ("C", 12), ("D", 14), ("E", 10), ("F", 35), ("G", 16)])
 
     df = date_from.strftime("%Y%m%d") if date_from else "start"
     dt = date_to.strftime("%Y%m%d") if date_to else "end"
