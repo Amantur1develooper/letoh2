@@ -1,6 +1,8 @@
 
-from django.shortcuts import render
+from django.shortcuts import redirect
 
 
 def home(request):
-    return render(request,'base.html')
+    if request.user.is_authenticated:
+        return redirect("dds:hotel_list")
+    return redirect("/accounts/login/")
