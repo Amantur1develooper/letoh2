@@ -50,6 +50,7 @@ from django.db.models.functions import Coalesce, TruncDate
 from collections import OrderedDict
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import BarChart, PieChart, Reference
 
 def _parse_date(d: str):
     try:
@@ -127,6 +128,112 @@ def _xl_widths(ws, pairs):
     """Установка ширины колонок: pairs = [('A', 20), ('B', 14), ...]."""
     for letter, w in pairs:
         ws.column_dimensions[letter].width = w
+
+
+def _xl_analysis_sheet(wb, income_items, expense_items):
+    """
+    Добавляет лист «Анализ» с:
+      • сводной таблицей Доходы / Расходы + %
+      • круговой диаграммой Доходы vs Расходы
+      • детализацией по статьям + %
+      • столбчатыми диаграммами по статьям
+    income_items  – [(название, Decimal), ...]
+    expense_items – [(название, Decimal), ...]
+    """
+    ws = wb.create_sheet("Анализ")
+
+    total_inc = sum((a for _, a in income_items),  Decimal("0.00"))
+    total_exp = sum((a for _, a in expense_items), Decimal("0.00"))
+    total_all = total_inc + total_exp
+
+    # ── Секция 1: сводка Доходы / Расходы ──────────────────────────────────
+    _xl_hdr(ws, 1, ["Показатель", "Сумма", "% от общего"])
+    _xl_row(ws, 2, ["Доходы",  float(total_inc), _pct(total_inc, total_all)],
+            money_cols=(2,), pct_cols=(3,))
+    _xl_row(ws, 3, ["Расходы", float(total_exp), _pct(total_exp, total_all)],
+            money_cols=(2,), pct_cols=(3,))
+    _xl_total_row(ws, 4, ["ИТОГО", float(total_all), 1.0],
+                  money_cols=(2,), pct_cols=(3,))
+
+    # ── Круговая диаграмма: Доходы vs Расходы ──────────────────────────────
+    pie = PieChart()
+    pie.title  = "Доходы vs Расходы"
+    pie.style  = 10
+    pie.width  = 14
+    pie.height = 10
+    pie.add_data(Reference(ws, min_col=2, min_row=1, max_row=3), titles_from_data=True)
+    pie.set_categories(Reference(ws, min_col=1, min_row=2, max_row=3))
+    ws.add_chart(pie, "E1")
+
+    # ── Секция 2: детализация по статьям ───────────────────────────────────
+    row = 6
+    inc_rows = exp_rows = None
+
+    if income_items:
+        c = ws.cell(row=row, column=1, value="▶ ДОХОДЫ")
+        c.font = Font(bold=True, size=11, color="1A5E20")
+        row += 1
+        _xl_hdr(ws, row, ["Статья", "Сумма", "% от дохода"])
+        row += 1
+        r0 = row
+        for name, amount in sorted(income_items, key=lambda x: -x[1]):
+            _xl_row(ws, row, [name, float(amount), _pct(amount, total_inc)],
+                    money_cols=(2,), pct_cols=(3,))
+            row += 1
+        inc_rows = (r0, row - 1)
+        _xl_total_row(ws, row, ["ИТОГО доход", float(total_inc), 1.0],
+                      money_cols=(2,), pct_cols=(3,))
+        row += 2
+
+    if expense_items:
+        c = ws.cell(row=row, column=1, value="▶ РАСХОДЫ")
+        c.font = Font(bold=True, size=11, color="B71C1C")
+        row += 1
+        _xl_hdr(ws, row, ["Статья", "Сумма", "% от расхода"])
+        row += 1
+        r0 = row
+        for name, amount in sorted(expense_items, key=lambda x: -x[1]):
+            _xl_row(ws, row, [name, float(amount), _pct(amount, total_exp)],
+                    money_cols=(2,), pct_cols=(3,))
+            row += 1
+        exp_rows = (r0, row - 1)
+        _xl_total_row(ws, row, ["ИТОГО расход", float(total_exp), 1.0],
+                      money_cols=(2,), pct_cols=(3,))
+        row += 2
+
+    # ── Столбчатые диаграммы ────────────────────────────────────────────────
+    chart_col = "E"
+    chart_row = 21
+
+    if inc_rows:
+        d_start, d_end = inc_rows
+        bar = BarChart()
+        bar.type     = "col"
+        bar.title    = "Доходы по статьям"
+        bar.style    = 10
+        bar.grouping = "clustered"
+        bar.width    = 22
+        bar.height   = 13
+        bar.add_data(Reference(ws, min_col=2, min_row=d_start - 1, max_row=d_end), titles_from_data=True)
+        bar.set_categories(Reference(ws, min_col=1, min_row=d_start, max_row=d_end))
+        ws.add_chart(bar, f"{chart_col}{chart_row}")
+        chart_row += 22
+
+    if exp_rows:
+        d_start, d_end = exp_rows
+        bar = BarChart()
+        bar.type     = "col"
+        bar.title    = "Расходы по статьям"
+        bar.style    = 10
+        bar.grouping = "clustered"
+        bar.width    = 22
+        bar.height   = 13
+        bar.add_data(Reference(ws, min_col=2, min_row=d_start - 1, max_row=d_end), titles_from_data=True)
+        bar.set_categories(Reference(ws, min_col=1, min_row=d_start, max_row=d_end))
+        ws.add_chart(bar, f"{chart_col}{chart_row}")
+
+    _xl_widths(ws, [("A", 38), ("B", 16), ("C", 12)])
+    return ws
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -174,6 +281,15 @@ def hotel_detail_export_excel(request, pk):
         .annotate(total=Coalesce(Sum("amount"), Decimal("0.00")))
         .order_by("day")
     )
+
+    # данные для листа Анализ
+    by_article_q = list(
+        ops.values("article__kind", "article__name")
+        .annotate(total=Coalesce(Sum("amount"), Decimal("0.00")))
+        .order_by("article__kind", "-total")
+    )
+    inc_items = [(r["article__name"], r["total"]) for r in by_article_q if r["article__kind"] == DDSArticle.INCOME]
+    exp_items = [(r["article__name"], r["total"]) for r in by_article_q if r["article__kind"] == DDSArticle.EXPENSE]
 
     wb = Workbook()
 
@@ -241,6 +357,9 @@ def hotel_detail_export_excel(request, pk):
         ("A", 16), ("B", 9), ("C", 28), ("D", 12),
         ("E", 14), ("F", 10), ("G", 22), ("H", 12), ("I", 35),
     ])
+
+    # ── Лист 4: Анализ (доходы/расходы по статьям + графики) ─────────────
+    _xl_analysis_sheet(wb, inc_items, exp_items)
 
     df = date_from.strftime("%Y%m%d") if date_from else "start"
     dt = date_to.strftime("%Y%m%d") if date_to else "end"
@@ -1251,6 +1370,13 @@ def unified_report_export_excel(request):
     _xl_total_row(ws3, last + 1, ["Расход", "ИТОГО расход", float(exp_total_art), 1.0], money_cols=(3,), pct_cols=(4,))
     _xl_widths(ws3, [("A", 10), ("B", 38), ("C", 16), ("D", 12)])
 
+    # ── Лист 4: Анализ ────────────────────────────────────────────────────
+    _xl_analysis_sheet(
+        wb,
+        income_items=[(r["article__name"], r["total"]) for r in articles_list if r["article__kind"] == DDSArticle.INCOME],
+        expense_items=[(r["article__name"], r["total"]) for r in articles_list if r["article__kind"] != DDSArticle.INCOME],
+    )
+
     df = date_from.strftime("%Y%m%d") if date_from else "start"
     dt = date_to.strftime("%Y%m%d") if date_to else "end"
     filename = f"unified_report_{df}_{dt}.xlsx"
@@ -1493,6 +1619,18 @@ def accounting_export_excel(request):
                   ["", "", "ИТОГО", float(inc_total), 1.0, "", ""],
                   money_cols=(4,), pct_cols=(5,))
     _xl_widths(ws3, [("A", 16), ("B", 22), ("C", 12), ("D", 14), ("E", 10), ("F", 35), ("G", 16)])
+
+    # ── Лист 4: Анализ ────────────────────────────────────────────────────
+    by_article_exp = list(
+        expenses.values("article__name")
+        .annotate(total=Coalesce(Sum("amount"), Decimal("0.00")))
+        .order_by("-total")
+    )
+    _xl_analysis_sheet(
+        wb,
+        income_items=[("Инкассации", inc_total)],
+        expense_items=[(r["article__name"], r["total"]) for r in by_article_exp],
+    )
 
     df = date_from.strftime("%Y%m%d") if date_from else "start"
     dt = date_to.strftime("%Y%m%d") if date_to else "end"
